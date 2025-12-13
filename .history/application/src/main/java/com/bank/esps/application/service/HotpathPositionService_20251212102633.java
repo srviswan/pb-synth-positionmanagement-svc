@@ -1,0 +1,337 @@
+package com.bank.esps.application.service;
+
+import com.bank.esps.domain.enums.EventType;
+import com.bank.esps.domain.enums.ReconciliationStatus;
+import com.bank.esps.domain.event.TradeEvent;
+import com.bank.esps.domain.model.*;
+import com.bank.esps.infrastructure.persistence.entity.EventEntity;
+import com.bank.esps.infrastructure.persistence.entity.SnapshotEntity;
+import com.bank.esps.infrastructure.persistence.repository.EventStoreRepository;
+import com.bank.esps.infrastructure.persistence.repository.SnapshotRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+
+import java.time.OffsetDateTime;
+import java.util.Optional;
+
+/**
+ * Hotpath position service
+ * Processes current/forward-dated trades synchronously
+ * Target latency: <100ms p99
+ */
+@Service
+public class HotpathPositionService {
+    
+    private static final Logger log = LoggerFactory.getLogger(HotpathPositionService.class);
+    
+    private final EventStoreRepository eventStoreRepository;
+    private final SnapshotRepository snapshotRepository;
+    private final LotLogic lotLogic;
+    private final ContractRulesService contractRulesService;
+    private final IdempotencyService idempotencyService;
+    private final ObjectMapper objectMapper;
+    
+    @PersistenceContext
+    private EntityManager entityManager;
+    
+    public HotpathPositionService(
+            EventStoreRepository eventStoreRepository,
+            SnapshotRepository snapshotRepository,
+            LotLogic lotLogic,
+            ContractRulesService contractRulesService,
+            IdempotencyService idempotencyService,
+            ObjectMapper objectMapper) {
+        this.eventStoreRepository = eventStoreRepository;
+        this.snapshotRepository = snapshotRepository;
+        this.lotLogic = lotLogic;
+        this.contractRulesService = contractRulesService;
+        this.idempotencyService = idempotencyService;
+        this.objectMapper = objectMapper;
+    }
+    
+    /**
+     * Process current-dated or forward-dated trade
+     * Synchronous processing with optimistic locking
+     */
+    @Transactional
+    @Retryable(
+            retryFor = {DataIntegrityViolationException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 50, multiplier = 2)
+    )
+    public void processCurrentDatedTrade(TradeEvent tradeEvent) {
+        String positionKey = tradeEvent.getPositionKey();
+        
+        // 1. Load snapshot with optimistic locking
+        // Clear persistence context to ensure we get fresh data from database
+        if (entityManager != null) {
+            entityManager.clear();
+        }
+        
+        // Use findById and create if not exists, ensuring we get the latest version
+        // Always query fresh from database to avoid stale cache
+        Optional<SnapshotEntity> snapshotOpt = snapshotRepository.findById(positionKey);
+        SnapshotEntity snapshot;
+        
+        if (snapshotOpt.isPresent()) {
+            snapshot = snapshotOpt.get();
+            // Detach and reload to ensure fresh data
+            if (entityManager != null && entityManager.contains(snapshot)) {
+                entityManager.detach(snapshot);
+            }
+            // Reload from database
+            snapshot = snapshotRepository.findById(positionKey).orElse(snapshot);
+        } else {
+            snapshot = createNewSnapshot(positionKey, tradeEvent);
+            snapshot = snapshotRepository.save(snapshot);
+        }
+        
+        long expectedVersion = snapshot.getLastVer() + 1;
+        
+        // 2. Apply business logic
+        PositionState state = inflateSnapshot(snapshot);
+        
+        // Debug: Log state before processing
+        int lotCount = state.getOpenLots().size();
+        int allLotsCount = state.getAllLots().size();
+        BigDecimal totalQty = state.getTotalQty();
+        log.debug("Processing trade {} for position {}, current state has {} open lots ({} total), total qty: {}, snapshot version: {}", 
+                tradeEvent.getTradeId(), positionKey, lotCount, allLotsCount, totalQty, snapshot.getLastVer());
+        
+        // Validate state before processing DECREASE
+        if (tradeEvent.isDecrease() && lotCount == 0) {
+            log.error("Attempting DECREASE on position {} with no open lots. Snapshot version: {}, all lots: {}, taxLotsCompressed length: {}", 
+                    positionKey, snapshot.getLastVer(), allLotsCount,
+                    snapshot.getTaxLotsCompressed() != null ? snapshot.getTaxLotsCompressed().length() : 0);
+            if (snapshot.getTaxLotsCompressed() != null && snapshot.getTaxLotsCompressed().length() > 0) {
+                log.error("Tax lots compressed data (first 200 chars): {}", 
+                        snapshot.getTaxLotsCompressed().substring(0, Math.min(200, snapshot.getTaxLotsCompressed().length())));
+            }
+            throw new IllegalStateException("Cannot process DECREASE: position has no open lots. Expected lots from previous trades.");
+        }
+        ContractRules rules = contractRulesService.getContractRules(tradeEvent.getContractId());
+        LotAllocationResult result;
+        
+        if (tradeEvent.isIncrease()) {
+            result = lotLogic.addLot(state, tradeEvent.getQuantity(), 
+                    tradeEvent.getPrice(), tradeEvent.getEffectiveDate());
+            log.debug("After adding lot, state now has {} open lots ({} total), total qty: {}", 
+                    state.getOpenLots().size(), state.getAllLots().size(), state.getTotalQty());
+        } else {
+            result = lotLogic.reduceLots(state, tradeEvent.getQuantity(), rules);
+            log.debug("After reducing lots, state now has {} open lots ({} total), total qty: {}", 
+                    state.getOpenLots().size(), state.getAllLots().size(), state.getTotalQty());
+        }
+        
+        // Verify state has lots before saving (especially for INCREASE after NEW_TRADE)
+        int lotsBeforeSave = state.getAllLots().size();
+        if (lotsBeforeSave == 0 && tradeEvent.isIncrease()) {
+            log.error("ERROR: State has 0 lots after adding lot for trade {}. This should not happen!", tradeEvent.getTradeId());
+        }
+        
+        // 3. Persist event (source of truth)
+        EventEntity event = createEventEntity(tradeEvent, expectedVersion, result);
+        
+        try {
+            eventStoreRepository.save(event);
+        } catch (DataIntegrityViolationException e) {
+            // Concurrency detected: retry
+            log.warn("Version conflict for position {}, retrying", positionKey);
+            throw e;
+        }
+        
+        // 4. Update snapshot (cache) - ensure we save all lots
+        updateSnapshot(snapshot, state, expectedVersion, ReconciliationStatus.RECONCILED);
+        
+        // Verify snapshot has data before saving
+        if (snapshot.getTaxLotsCompressed() == null || snapshot.getTaxLotsCompressed().trim().isEmpty()) {
+            log.error("ERROR: Snapshot taxLotsCompressed is empty before save for trade {}! State had {} lots.", 
+                    tradeEvent.getTradeId(), lotsBeforeSave);
+        }
+        
+        snapshotRepository.saveAndFlush(snapshot); // Use saveAndFlush to ensure immediate persistence
+        
+        // Verify snapshot was saved correctly
+        SnapshotEntity savedSnapshot = snapshotRepository.findById(positionKey).orElse(null);
+        if (savedSnapshot != null && (savedSnapshot.getTaxLotsCompressed() == null || savedSnapshot.getTaxLotsCompressed().trim().isEmpty())) {
+            log.error("ERROR: Snapshot taxLotsCompressed is empty after save for trade {}!", tradeEvent.getTradeId());
+        }
+        
+        // 5. Mark as processed
+        idempotencyService.markAsProcessed(tradeEvent, expectedVersion);
+        
+        log.debug("Successfully processed trade {} for position {}, version {}", 
+                tradeEvent.getTradeId(), positionKey, expectedVersion);
+    }
+    
+    /**
+     * Create new snapshot for new position
+     */
+    private SnapshotEntity createNewSnapshot(String positionKey, TradeEvent tradeEvent) {
+        PositionState initialState = new PositionState();
+        CompressedLots emptyCompressed = CompressedLots.compress(initialState.getOpenLots());
+        
+        SnapshotEntity snapshot = new SnapshotEntity();
+        snapshot.setPositionKey(positionKey);
+        snapshot.setLastVer(0L);
+        snapshot.setUti(tradeEvent.getTradeId()); // Initial UTI
+        snapshot.setStatus(com.bank.esps.domain.enums.PositionStatus.ACTIVE);
+        snapshot.setReconciliationStatus(ReconciliationStatus.RECONCILED);
+        snapshot.setTaxLotsCompressed(toJson(emptyCompressed));
+        snapshot.setSummaryMetrics(toJson(createSummaryMetrics(initialState)));
+        snapshot.setVersion(0L);
+        return snapshot;
+    }
+    
+    /**
+     * Inflate snapshot to PositionState
+     */
+    private PositionState inflateSnapshot(SnapshotEntity snapshot) {
+        try {
+            if (snapshot.getTaxLotsCompressed() == null || snapshot.getTaxLotsCompressed().trim().isEmpty()) {
+                log.debug("Snapshot for position {} has empty tax lots compressed, returning empty state", snapshot.getPositionKey());
+                return new PositionState();
+            }
+            
+            String compressedJson = snapshot.getTaxLotsCompressed();
+            log.debug("Inflating snapshot for position {}, compressed JSON length: {}", 
+                    snapshot.getPositionKey(), compressedJson.length());
+            
+            CompressedLots compressed = objectMapper.readValue(compressedJson, CompressedLots.class);
+            List<TaxLot> inflatedLots = compressed.inflate();
+            
+            PositionState state = new PositionState();
+            // CRITICAL: setOpenLots() sets the raw field directly
+            // The raw field is what getAllLots() reads from
+            // getOpenLots() filters the raw field to exclude closed lots
+            state.setOpenLots(inflatedLots);
+            
+            // Verify the lots were set correctly
+            if (inflatedLots.size() > 0) {
+                int rawLotsCount = state.getAllLots().size();
+                if (rawLotsCount != inflatedLots.size()) {
+                    log.error("MISMATCH: Inflated {} lots but getAllLots() returned {}. This indicates a problem!", 
+                            inflatedLots.size(), rawLotsCount);
+                }
+            }
+            
+            int openLotsCount = state.getOpenLots().size();
+            BigDecimal totalQty = state.getTotalQty();
+            log.debug("Successfully inflated {} lots from snapshot for position {}: {} open lots, total qty: {}", 
+                    inflatedLots.size(), snapshot.getPositionKey(), openLotsCount, totalQty);
+            
+            if (inflatedLots.size() > 0 && openLotsCount == 0) {
+                log.warn("Warning: Inflated {} lots but getOpenLots() returned 0. All lots may be closed.", inflatedLots.size());
+            }
+            
+            return state;
+        } catch (Exception e) {
+            log.error("Error inflating snapshot for position {}: {}. Compressed data: {}", 
+                    snapshot.getPositionKey(), e.getMessage(),
+                    snapshot.getTaxLotsCompressed() != null ? 
+                        snapshot.getTaxLotsCompressed().substring(0, Math.min(200, snapshot.getTaxLotsCompressed().length())) : "null", e);
+            // Return empty state on error
+            return new PositionState();
+        }
+    }
+    
+    /**
+     * Create event entity
+     */
+    private EventEntity createEventEntity(TradeEvent trade, long version, LotAllocationResult result) {
+        try {
+            EventEntity event = new EventEntity();
+            event.setPositionKey(trade.getPositionKey());
+            event.setEventVer(version);
+            event.setEventType(EventType.valueOf(trade.getTradeType()));
+            event.setEffectiveDate(trade.getEffectiveDate());
+            event.setOccurredAt(OffsetDateTime.now());
+            event.setPayload(toJson(trade));
+            event.setMetaLots(toJson(result.getAllocationsMap()));
+            event.setCorrelationId(trade.getCorrelationId());
+            event.setCausationId(trade.getCausationId());
+            event.setContractId(trade.getContractId());
+            event.setUserId(trade.getUserId());
+            return event;
+        } catch (Exception e) {
+            log.error("Error creating event entity", e);
+            throw new RuntimeException("Failed to create event entity", e);
+        }
+    }
+    
+    /**
+     * Update snapshot from position state
+     */
+    private void updateSnapshot(SnapshotEntity snapshot, PositionState state, 
+                               long version, ReconciliationStatus reconciliationStatus) {
+        // CRITICAL FIX: Use getAllLots() to get the raw list (not filtered)
+        // getAllLots() returns a new ArrayList copy of the raw openLots field
+        // This ensures we save all lots including closed ones for history
+        List<TaxLot> allLots = state.getAllLots();
+        int openLotsCount = state.getOpenLots().size();
+        BigDecimal totalQty = state.getTotalQty();
+        
+        log.debug("Updating snapshot for position {}: state has {} total lots ({} open), total qty: {}", 
+                snapshot.getPositionKey(), allLots.size(), openLotsCount, totalQty);
+        
+        // Verify we have lots to save
+        if (allLots.isEmpty() && openLotsCount > 0) {
+            log.error("CRITICAL: getAllLots() returned empty but getOpenLots() has {} lots. This is a bug!", openLotsCount);
+            // Fallback: try to get lots directly from the state's internal field
+            // This shouldn't be necessary but let's be defensive
+            throw new IllegalStateException("Cannot save snapshot: getAllLots() is empty but getOpenLots() has lots. Data inconsistency detected.");
+        }
+        
+        if (allLots.isEmpty()) {
+            log.warn("Warning: Saving snapshot with 0 lots for position {}", snapshot.getPositionKey());
+        }
+        
+        CompressedLots compressed = CompressedLots.compress(allLots);
+        String compressedJson = toJson(compressed);
+        
+        // Verify compression worked
+        if (compressedJson == null || compressedJson.trim().isEmpty()) {
+            log.error("CRITICAL: Compressed JSON is empty after compressing {} lots!", allLots.size());
+            throw new IllegalStateException("Failed to compress lots: JSON is empty");
+        }
+        
+        snapshot.setLastVer(version);
+        snapshot.setTaxLotsCompressed(compressedJson);
+        snapshot.setSummaryMetrics(toJson(createSummaryMetrics(state)));
+        snapshot.setReconciliationStatus(reconciliationStatus);
+        
+        log.debug("Updated snapshot for position {} to version {}, compressed {} lots, JSON length: {}", 
+                snapshot.getPositionKey(), version, allLots.size(), compressedJson.length());
+    }
+    
+    /**
+     * Create summary metrics
+     */
+    private java.util.Map<String, Object> createSummaryMetrics(PositionState state) {
+        return java.util.Map.of(
+                "net_qty", state.getTotalQty(),
+                "exposure", state.getExposure(),
+                "lot_count", state.getLotCount()
+        );
+    }
+    
+    /**
+     * Convert object to JSON string
+     */
+    private String toJson(Object obj) {
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (Exception e) {
+            log.error("Error serializing to JSON", e);
+            return "{}";
+        }
+    }
+}
