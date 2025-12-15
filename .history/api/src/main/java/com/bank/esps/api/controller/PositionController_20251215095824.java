@@ -209,7 +209,7 @@ public class PositionController {
         response.put("openLots", state.getOpenLots().size());
         response.put("totalLots", state.getAllLots().size());
         response.put("exposure", state.getExposure());
-        response.put("positionStatus", snapshot.getStatus().toString()); // Renamed to avoid conflict
+        response.put("status", snapshot.getStatus().toString());
         response.put("upi", snapshot.getUti());
         
         return ResponseEntity.ok(response);
@@ -448,7 +448,7 @@ public class PositionController {
         response.put("status", "success");
         response.put("positionKey", snapshot.getPositionKey());
         response.put("upi", snapshot.getUti());
-        response.put("positionStatus", snapshot.getStatus().toString()); // Renamed to avoid conflict
+        response.put("status", snapshot.getStatus().toString());
         response.put("reconciliationStatus", snapshot.getReconciliationStatus().toString());
         response.put("lastVersion", snapshot.getLastVer());
         response.put("lastUpdatedAt", snapshot.getLastUpdatedAt().toString());
@@ -479,20 +479,6 @@ public class PositionController {
         response.put("exposure", state.getExposure());
         response.put("openLotsCount", state.getOpenLots().size());
         response.put("totalLotsCount", state.getAllLots().size());
-        
-        // Add lookup fields
-        if (snapshot.getAccount() != null) {
-            response.put("account", snapshot.getAccount());
-        }
-        if (snapshot.getInstrument() != null) {
-            response.put("instrument", snapshot.getInstrument());
-        }
-        if (snapshot.getCurrency() != null) {
-            response.put("currency", snapshot.getCurrency());
-        }
-        if (snapshot.getContractId() != null) {
-            response.put("contractId", snapshot.getContractId());
-        }
         
         // Add summary metrics if available
         if (snapshot.getSummaryMetrics() != null && !snapshot.getSummaryMetrics().trim().isEmpty()) {

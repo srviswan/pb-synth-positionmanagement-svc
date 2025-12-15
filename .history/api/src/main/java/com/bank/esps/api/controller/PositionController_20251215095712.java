@@ -70,50 +70,28 @@ public class PositionController {
     }
     
     /**
-     * Get all positions with optional filtering and pagination
+     * Get all positions with optional filtering
      * 
      * @param status Optional filter by position status (ACTIVE, TERMINATED)
      * @param reconciliationStatus Optional filter by reconciliation status
      * @param includeArchived Optional flag to include archived positions (default: false)
-     * @param page Page number (0-indexed, default: 0)
-     * @param size Page size (default: 20, max: 100)
-     * @param sortBy Sort field (default: lastUpdatedAt)
-     * @param sortDir Sort direction (ASC, DESC, default: DESC)
-     * @return Paginated list of positions
+     * @return List of positions
      */
     @GetMapping
     public ResponseEntity<Map<String, Object>> getAllPositions(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String reconciliationStatus,
-            @RequestParam(required = false, defaultValue = "false") boolean includeArchived,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "lastUpdatedAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir) {
+            @RequestParam(required = false, defaultValue = "false") boolean includeArchived) {
         
-        log.info("Querying all positions - status: {}, reconciliationStatus: {}, includeArchived: {}, page: {}, size: {}", 
-                status, reconciliationStatus, includeArchived, page, size);
+        log.info("Querying all positions - status: {}, reconciliationStatus: {}, includeArchived: {}", 
+                status, reconciliationStatus, includeArchived);
         
-        // Validate and limit page size
-        size = Math.min(size, 100);
-        size = Math.max(size, 1);
-        
-        // Create pageable with sorting
-        Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-        Pageable pageable = PageRequest.of(page, size, sort);
-        
-        Page<SnapshotEntity> snapshotPage;
+        List<SnapshotEntity> snapshots;
         
         if (reconciliationStatus != null) {
             try {
                 ReconciliationStatus reconStatus = ReconciliationStatus.valueOf(reconciliationStatus.toUpperCase());
-                // Note: findAllByReconciliationStatus doesn't support pagination, need to add it to repository
-                List<SnapshotEntity> snapshots = snapshotRepository.findAllByReconciliationStatus(reconStatus);
-                // Convert to page manually (for now - should add paginated method to repository)
-                int start = (int) pageable.getOffset();
-                int end = Math.min((start + pageable.getPageSize()), snapshots.size());
-                List<SnapshotEntity> pageContent = start < snapshots.size() ? snapshots.subList(start, end) : new ArrayList<>();
-                snapshotPage = new org.springframework.data.domain.PageImpl<>(pageContent, pageable, snapshots.size());
+                snapshots = snapshotRepository.findAllByReconciliationStatus(reconStatus);
             } catch (IllegalArgumentException e) {
                 Map<String, Object> response = new HashMap<>();
                 response.put("status", "error");
@@ -121,17 +99,16 @@ public class PositionController {
                 return ResponseEntity.badRequest().body(response);
             }
         } else {
-            snapshotPage = snapshotRepository.findAll(pageable);
+            snapshots = snapshotRepository.findAll();
         }
         
         // Filter by status if provided
         if (status != null) {
             try {
                 PositionStatus positionStatus = PositionStatus.valueOf(status.toUpperCase());
-                List<SnapshotEntity> filtered = snapshotPage.getContent().stream()
+                snapshots = snapshots.stream()
                         .filter(s -> s.getStatus() == positionStatus)
                         .collect(Collectors.toList());
-                snapshotPage = new org.springframework.data.domain.PageImpl<>(filtered, pageable, filtered.size());
             } catch (IllegalArgumentException e) {
                 Map<String, Object> response = new HashMap<>();
                 response.put("status", "error");
@@ -142,13 +119,21 @@ public class PositionController {
         
         // Filter archived if not including
         if (!includeArchived) {
-            List<SnapshotEntity> filtered = snapshotPage.getContent().stream()
+            snapshots = snapshots.stream()
                     .filter(s -> s.getArchivalFlag() == null || !s.getArchivalFlag())
                     .collect(Collectors.toList());
-            snapshotPage = new org.springframework.data.domain.PageImpl<>(filtered, pageable, filtered.size());
         }
         
-        return buildPaginatedResponse(snapshotPage);
+        List<Map<String, Object>> positions = snapshots.stream()
+                .map(this::buildPositionSummary)
+                .collect(Collectors.toList());
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", "success");
+        response.put("count", positions.size());
+        response.put("positions", positions);
+        
+        return ResponseEntity.ok(response);
     }
     
     /**
@@ -209,7 +194,7 @@ public class PositionController {
         response.put("openLots", state.getOpenLots().size());
         response.put("totalLots", state.getAllLots().size());
         response.put("exposure", state.getExposure());
-        response.put("positionStatus", snapshot.getStatus().toString()); // Renamed to avoid conflict
+        response.put("status", snapshot.getStatus().toString());
         response.put("upi", snapshot.getUti());
         
         return ResponseEntity.ok(response);
@@ -263,184 +248,6 @@ public class PositionController {
     }
     
     /**
-     * Get positions by account with pagination
-     * 
-     * @param account The account identifier
-     * @param status Optional filter by position status (ACTIVE, TERMINATED)
-     * @param page Page number (0-indexed, default: 0)
-     * @param size Page size (default: 20, max: 100)
-     * @param sortBy Sort field (default: lastUpdatedAt)
-     * @param sortDir Sort direction (ASC, DESC, default: DESC)
-     * @return Paginated list of positions
-     */
-    @GetMapping("/by-account/{account}")
-    public ResponseEntity<Map<String, Object>> getPositionsByAccount(
-            @PathVariable String account,
-            @RequestParam(required = false) String status,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "lastUpdatedAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir) {
-        
-        log.info("Querying positions by account: {}, status: {}, page: {}, size: {}", account, status, page, size);
-        
-        // Validate and limit page size
-        size = Math.min(size, 100);
-        size = Math.max(size, 1);
-        
-        // Create pageable with sorting
-        Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-        Pageable pageable = PageRequest.of(page, size, sort);
-        
-        Page<SnapshotEntity> snapshotPage;
-        
-        if (status != null) {
-            try {
-                PositionStatus positionStatus = PositionStatus.valueOf(status.toUpperCase());
-                snapshotPage = snapshotRepository.findByAccountAndStatusAndArchivalFlagFalse(account, positionStatus, pageable);
-            } catch (IllegalArgumentException e) {
-                Map<String, Object> response = new HashMap<>();
-                response.put("status", "error");
-                response.put("message", "Invalid position status: " + status);
-                return ResponseEntity.badRequest().body(response);
-            }
-        } else {
-            snapshotPage = snapshotRepository.findByAccountAndArchivalFlagFalse(account, pageable);
-        }
-        
-        return buildPaginatedResponse(snapshotPage);
-    }
-    
-    /**
-     * Get positions by instrument (security identifier) with pagination
-     * 
-     * @param instrument The instrument/security identifier (e.g., AAPL, MSFT)
-     * @param page Page number (0-indexed, default: 0)
-     * @param size Page size (default: 20, max: 100)
-     * @param sortBy Sort field (default: lastUpdatedAt)
-     * @param sortDir Sort direction (ASC, DESC, default: DESC)
-     * @return Paginated list of positions
-     */
-    @GetMapping("/by-instrument/{instrument}")
-    public ResponseEntity<Map<String, Object>> getPositionsByInstrument(
-            @PathVariable String instrument,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "lastUpdatedAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir) {
-        
-        log.info("Querying positions by instrument: {}, page: {}, size: {}", instrument, page, size);
-        
-        size = Math.min(size, 100);
-        size = Math.max(size, 1);
-        
-        Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-        Pageable pageable = PageRequest.of(page, size, sort);
-        
-        Page<SnapshotEntity> snapshotPage = snapshotRepository.findByInstrumentAndArchivalFlagFalse(instrument, pageable);
-        
-        return buildPaginatedResponse(snapshotPage);
-    }
-    
-    /**
-     * Get positions by account and instrument with pagination
-     * 
-     * @param account The account identifier
-     * @param instrument The instrument/security identifier
-     * @param currency Optional currency filter
-     * @param page Page number (0-indexed, default: 0)
-     * @param size Page size (default: 20, max: 100)
-     * @param sortBy Sort field (default: lastUpdatedAt)
-     * @param sortDir Sort direction (ASC, DESC, default: DESC)
-     * @return Paginated list of positions
-     */
-    @GetMapping("/by-account/{account}/instrument/{instrument}")
-    public ResponseEntity<Map<String, Object>> getPositionsByAccountAndInstrument(
-            @PathVariable String account,
-            @PathVariable String instrument,
-            @RequestParam(required = false) String currency,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "lastUpdatedAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir) {
-        
-        log.info("Querying positions by account: {}, instrument: {}, currency: {}, page: {}, size: {}", 
-                account, instrument, currency, page, size);
-        
-        size = Math.min(size, 100);
-        size = Math.max(size, 1);
-        
-        Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-        Pageable pageable = PageRequest.of(page, size, sort);
-        
-        Page<SnapshotEntity> snapshotPage;
-        
-        if (currency != null && !currency.isEmpty()) {
-            snapshotPage = snapshotRepository.findByAccountAndInstrumentAndCurrencyAndArchivalFlagFalse(
-                    account, instrument, currency, pageable);
-        } else {
-            snapshotPage = snapshotRepository.findByAccountAndInstrumentAndArchivalFlagFalse(
-                    account, instrument, pageable);
-        }
-        
-        return buildPaginatedResponse(snapshotPage);
-    }
-    
-    /**
-     * Get positions by contract ID with pagination
-     * 
-     * @param contractId The contract identifier
-     * @param page Page number (0-indexed, default: 0)
-     * @param size Page size (default: 20, max: 100)
-     * @param sortBy Sort field (default: lastUpdatedAt)
-     * @param sortDir Sort direction (ASC, DESC, default: DESC)
-     * @return Paginated list of positions
-     */
-    @GetMapping("/by-contract/{contractId}")
-    public ResponseEntity<Map<String, Object>> getPositionsByContract(
-            @PathVariable String contractId,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "lastUpdatedAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir) {
-        
-        log.info("Querying positions by contract: {}, page: {}, size: {}", contractId, page, size);
-        
-        size = Math.min(size, 100);
-        size = Math.max(size, 1);
-        
-        Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-        Pageable pageable = PageRequest.of(page, size, sort);
-        
-        Page<SnapshotEntity> snapshotPage = snapshotRepository.findByContractIdAndArchivalFlagFalse(contractId, pageable);
-        
-        return buildPaginatedResponse(snapshotPage);
-    }
-    
-    /**
-     * Build paginated response from Page
-     */
-    private ResponseEntity<Map<String, Object>> buildPaginatedResponse(Page<SnapshotEntity> snapshotPage) {
-        List<Map<String, Object>> positions = snapshotPage.getContent().stream()
-                .map(this::buildPositionSummary)
-                .collect(Collectors.toList());
-        
-        Map<String, Object> response = new HashMap<>();
-        response.put("status", "success");
-        response.put("positions", positions);
-        response.put("pagination", Map.of(
-                "page", snapshotPage.getNumber(),
-                "size", snapshotPage.getSize(),
-                "totalElements", snapshotPage.getTotalElements(),
-                "totalPages", snapshotPage.getTotalPages(),
-                "hasNext", snapshotPage.hasNext(),
-                "hasPrevious", snapshotPage.hasPrevious()
-        ));
-        
-        return ResponseEntity.ok(response);
-    }
-    
-    /**
      * Build full position response from snapshot
      */
     private Map<String, Object> buildPositionResponse(SnapshotEntity snapshot) {
@@ -448,7 +255,7 @@ public class PositionController {
         response.put("status", "success");
         response.put("positionKey", snapshot.getPositionKey());
         response.put("upi", snapshot.getUti());
-        response.put("positionStatus", snapshot.getStatus().toString()); // Renamed to avoid conflict
+        response.put("status", snapshot.getStatus().toString());
         response.put("reconciliationStatus", snapshot.getReconciliationStatus().toString());
         response.put("lastVersion", snapshot.getLastVer());
         response.put("lastUpdatedAt", snapshot.getLastUpdatedAt().toString());
@@ -460,39 +267,11 @@ public class PositionController {
         // Inflate snapshot to get position state
         PositionState state = snapshotService.inflateSnapshot(snapshot);
         
-        // Add lookup fields
-        if (snapshot.getAccount() != null) {
-            response.put("account", snapshot.getAccount());
-        }
-        if (snapshot.getInstrument() != null) {
-            response.put("instrument", snapshot.getInstrument());
-        }
-        if (snapshot.getCurrency() != null) {
-            response.put("currency", snapshot.getCurrency());
-        }
-        if (snapshot.getContractId() != null) {
-            response.put("contractId", snapshot.getContractId());
-        }
-        
         // Add quantity and metrics
         response.put("quantity", state.getTotalQty());
         response.put("exposure", state.getExposure());
         response.put("openLotsCount", state.getOpenLots().size());
         response.put("totalLotsCount", state.getAllLots().size());
-        
-        // Add lookup fields
-        if (snapshot.getAccount() != null) {
-            response.put("account", snapshot.getAccount());
-        }
-        if (snapshot.getInstrument() != null) {
-            response.put("instrument", snapshot.getInstrument());
-        }
-        if (snapshot.getCurrency() != null) {
-            response.put("currency", snapshot.getCurrency());
-        }
-        if (snapshot.getContractId() != null) {
-            response.put("contractId", snapshot.getContractId());
-        }
         
         // Add summary metrics if available
         if (snapshot.getSummaryMetrics() != null && !snapshot.getSummaryMetrics().trim().isEmpty()) {
@@ -531,20 +310,6 @@ public class PositionController {
         summary.put("status", snapshot.getStatus().toString());
         summary.put("reconciliationStatus", snapshot.getReconciliationStatus().toString());
         summary.put("lastUpdatedAt", snapshot.getLastUpdatedAt().toString());
-        
-        // Add lookup fields
-        if (snapshot.getAccount() != null) {
-            summary.put("account", snapshot.getAccount());
-        }
-        if (snapshot.getInstrument() != null) {
-            summary.put("instrument", snapshot.getInstrument());
-        }
-        if (snapshot.getCurrency() != null) {
-            summary.put("currency", snapshot.getCurrency());
-        }
-        if (snapshot.getContractId() != null) {
-            summary.put("contractId", snapshot.getContractId());
-        }
         
         // Get basic quantity info
         try {
