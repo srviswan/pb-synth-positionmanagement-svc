@@ -327,3 +327,4 @@ class PositionControllerTest {
                 .andExpect(jsonPath("$.pagination.size").value(lessThanOrEqualTo(100)));
     }
 }
+
