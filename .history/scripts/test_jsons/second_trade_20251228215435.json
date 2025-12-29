@@ -1,0 +1,10 @@
+{
+  "tradeId": "T002",
+  "account": "ACC001",
+  "instrument": "AAPL",
+  "currency": "USD",
+  "quantity": 50,
+  "price": 155.00,
+  "tradeDate": "2024-01-16",
+  "effectiveDate": "2024-01-16"
+}

@@ -1,0 +1,10 @@
+{
+  "tradeId": "BACKDATED_SAME_DAY_001",
+  "account": "ACC006",
+  "instrument": "AMZN",
+  "currency": "USD",
+  "quantity": 30,
+  "price": 149.00,
+  "tradeDate": "BACKDATE",
+  "effectiveDate": "CURRENT_DATE"
+}

@@ -1,0 +1,11 @@
+{
+  "tradeId": "T_SETTLE_001",
+  "account": "ACC009",
+  "instrument": "AMD",
+  "currency": "USD",
+  "quantity": 500,
+  "price": 120.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE",
+  "settlementDate": "FORWARD_DATE"
+}

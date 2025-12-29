@@ -1,0 +1,10 @@
+{
+  "tradeId": "BACKDATED_BEFORE_001",
+  "account": "ACC007",
+  "instrument": "META",
+  "currency": "USD",
+  "quantity": 100,
+  "price": 300.00,
+  "tradeDate": "BACKDATE",
+  "effectiveDate": "BACKDATE"
+}

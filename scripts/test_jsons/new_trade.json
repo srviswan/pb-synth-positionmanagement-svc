@@ -1,0 +1,10 @@
+{
+  "tradeId": "T_NEW_001",
+  "account": "ACC002",
+  "instrument": "MSFT",
+  "currency": "USD",
+  "quantity": 200,
+  "price": 300.00,
+  "tradeDate": "2024-01-20",
+  "effectiveDate": "2024-01-20"
+}

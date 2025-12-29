@@ -1,0 +1,11 @@
+{
+  "tradeId": "T_HIFO_001",
+  "account": "ACC008",
+  "instrument": "NVDA",
+  "currency": "USD",
+  "quantity": 100,
+  "price": 50.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE",
+  "contractId": "CONTRACT_HIFO"
+}

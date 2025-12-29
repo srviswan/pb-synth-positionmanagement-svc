@@ -1,0 +1,10 @@
+{
+  "tradeId": "SAME_DAY_001",
+  "account": "ACC006",
+  "instrument": "AMZN",
+  "currency": "USD",
+  "quantity": 50,
+  "price": 150.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

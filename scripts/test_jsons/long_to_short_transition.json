@@ -1,0 +1,10 @@
+{
+  "tradeId": "LONG_TO_SHORT_001",
+  "account": "ACC004",
+  "instrument": "TSLA",
+  "currency": "USD",
+  "quantity": -150,
+  "price": 255.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

@@ -1,0 +1,10 @@
+{
+  "tradeId": "T_PT_001",
+  "account": "ACC001",
+  "instrument": "AAPL",
+  "currency": "USD",
+  "quantity": -149,
+  "price": 170.00,
+  "tradeDate": "2024-01-19",
+  "effectiveDate": "2024-01-19"
+}

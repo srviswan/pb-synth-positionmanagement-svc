@@ -1,0 +1,10 @@
+{
+  "tradeId": "T_HOTPATH_MULTI",
+  "account": "HOTPATH",
+  "instrument": "TEST",
+  "currency": "USD",
+  "quantity": 10,
+  "price": 200.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

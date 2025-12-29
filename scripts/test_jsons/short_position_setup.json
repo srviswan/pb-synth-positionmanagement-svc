@@ -1,0 +1,10 @@
+{
+  "tradeId": "SHORT_SETUP_001",
+  "account": "ACC005",
+  "instrument": "NVDA",
+  "currency": "USD",
+  "quantity": -50,
+  "price": 500.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

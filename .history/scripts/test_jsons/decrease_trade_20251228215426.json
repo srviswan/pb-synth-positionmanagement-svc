@@ -1,0 +1,10 @@
+{
+  "tradeId": "T_DEC_001",
+  "account": "ACC001",
+  "instrument": "AAPL",
+  "currency": "USD",
+  "quantity": -50,
+  "price": 165.00,
+  "tradeDate": "2024-01-18",
+  "effectiveDate": "2024-01-18"
+}

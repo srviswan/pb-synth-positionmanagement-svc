@@ -1,0 +1,10 @@
+{
+  "tradeId": "LONG_SETUP_001",
+  "account": "ACC004",
+  "instrument": "TSLA",
+  "currency": "USD",
+  "quantity": 100,
+  "price": 250.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

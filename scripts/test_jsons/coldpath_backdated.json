@@ -1,0 +1,10 @@
+{
+  "tradeId": "T_COLDPATH_001",
+  "account": "HOTPATH",
+  "instrument": "TEST",
+  "currency": "USD",
+  "quantity": 75,
+  "price": 190.00,
+  "tradeDate": "BACKDATE",
+  "effectiveDate": "BACKDATE"
+}

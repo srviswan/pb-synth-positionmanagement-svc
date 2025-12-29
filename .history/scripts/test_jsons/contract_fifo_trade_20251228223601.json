@@ -1,0 +1,11 @@
+{
+  "tradeId": "T_CONTRACT_FIFO_001",
+  "account": "ACC010",
+  "instrument": "INTC",
+  "currency": "USD",
+  "quantity": 200,
+  "price": 45.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE",
+  "contractId": "CONTRACT_FIFO"
+}

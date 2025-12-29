@@ -1,0 +1,10 @@
+{
+  "tradeId": "T_FULL_001",
+  "account": "ACC003",
+  "instrument": "GOOGL",
+  "currency": "USD",
+  "quantity": -100,
+  "price": 2550.00,
+  "tradeDate": "2024-01-22",
+  "effectiveDate": "2024-01-22"
+}
