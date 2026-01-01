@@ -241,7 +241,8 @@ run_concurrent_load() {
         
             # Calculate percentiles
             local sorted_times=$(echo "$valid_times" | sort -n)
-            local count=$(echo "$sorted_times" | wc -l | xargs || echo "0")
+            # Use tr to remove whitespace instead of xargs (fixes macOS sysconf error)
+            local count=$(echo "$sorted_times" | wc -l | tr -d ' \n\r' || echo "0")
             count=$((count + 0))
             if [ $count -gt 0 ]; then
                 local p50_idx=$((count * 50 / 100))
