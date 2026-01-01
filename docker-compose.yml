@@ -1,6 +1,36 @@
 version: '3.8'
 
 services:
+  # Solace PubSub+ Event Broker
+  solace:
+    image: solace/solace-pubsub-standard:latest
+    container_name: solace-broker
+    shm_size: '1gb'
+    ulimits:
+      nofile:
+        soft: 2448
+        hard: 1048576
+    ports:
+      - "8081:8080"   # Solace Management UI (using 8081 to avoid conflict with app on 8080)
+      - "55556:55555" # SMF (Solace Message Format) - JMS (using 55556 to avoid port conflict)
+      - "8008:8008"   # Management API
+      - "1883:1883"   # MQTT
+      - "9000:9000"   # Internal
+    environment:
+      - username_admin_globalaccesslevel=admin
+      - username_admin_password=admin
+      - system_scaling_maxconnectioncount=100
+      - system_scaling_maxqueuemessagecount=100
+    volumes:
+      - solace-data:/var/lib/solace
+    networks:
+      - position-mgmt-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5550/health-check/guaranteed-messaging || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: position-mgmt-sqlserver
@@ -78,6 +108,7 @@ services:
 
 volumes:
   sqlserver_data:
+  solace-data:
 
 networks:
   position-mgmt-network:

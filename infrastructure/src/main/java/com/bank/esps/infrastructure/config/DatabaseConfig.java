@@ -40,16 +40,9 @@ public class DatabaseConfig {
         // First, ensure database exists by connecting to master
         ensureDatabaseExists();
         
-        // Wait a moment for database to be ready
-        try {
-            Thread.sleep(1000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        
         HikariConfig config = new HikariConfig();
         
-        String jdbcUrl = String.format("jdbc:sqlserver://%s:%s;databaseName=%s;encrypt=true;trustServerCertificate=true",
+        String jdbcUrl = String.format("jdbc:sqlserver://%s:%s;databaseName=%s;encrypt=true;trustServerCertificate=true;loginTimeout=30",
                 dbHost, dbPort, dbName);
         
         config.setJdbcUrl(jdbcUrl);
@@ -58,18 +51,59 @@ public class DatabaseConfig {
         config.setDriverClassName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
         config.setMaximumPoolSize(50);
         config.setMinimumIdle(10);
-        config.setConnectionTimeout(20000);
+        config.setConnectionTimeout(30000); // Increased to 30 seconds
+        config.setInitializationFailTimeout(60000); // Wait up to 60 seconds for initial connection
         config.setLeakDetectionThreshold(60000);
+        config.setValidationTimeout(5000);
+        config.setConnectionTestQuery("SELECT 1");
         
         log.info("🔷 Configuring SQL Server database");
         log.info("🔷 SQL Server URL: {}", jdbcUrl);
+        log.info("🔷 Connection timeout: {}ms, Initialization timeout: {}ms", 
+                config.getConnectionTimeout(), config.getInitializationFailTimeout());
         
-        return new HikariDataSource(config);
+        HikariDataSource dataSource = new HikariDataSource(config);
+        
+        // Test connection with retry logic
+        testConnectionWithRetry(dataSource, 3, 2000);
+        
+        return dataSource;
+    }
+    
+    private void testConnectionWithRetry(HikariDataSource dataSource, int maxRetries, long delayMs) {
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                log.info("🔷 Testing database connection (attempt {}/{})...", attempt, maxRetries);
+                try (java.sql.Connection conn = dataSource.getConnection()) {
+                    log.info("🔷 ✅ Database connection successful!");
+                    return;
+                }
+            } catch (Exception e) {
+                if (attempt == maxRetries) {
+                    log.error("🔷 ❌ Failed to connect to database after {} attempts", maxRetries);
+                    log.error("🔷 Error: {}", e.getMessage());
+                    log.error("🔷 Please ensure SQL Server is running and accessible at {}:{}", dbHost, dbPort);
+                    log.error("🔷 You can start SQL Server using: docker-compose up -d sqlserver");
+                    // Don't throw - let HikariCP handle connection retries
+                    log.warn("🔷 Continuing anyway - HikariCP will retry connections as needed");
+                } else {
+                    log.warn("🔷 Connection attempt {} failed: {}. Retrying in {}ms...", 
+                            attempt, e.getMessage(), delayMs);
+                    try {
+                        Thread.sleep(delayMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        log.warn("🔷 Interrupted while waiting for retry");
+                        break;
+                    }
+                }
+            }
+        }
     }
     
     private void ensureDatabaseExists() {
         try {
-            String masterUrl = String.format("jdbc:sqlserver://%s:%s;databaseName=master;encrypt=true;trustServerCertificate=true",
+            String masterUrl = String.format("jdbc:sqlserver://%s:%s;databaseName=master;encrypt=true;trustServerCertificate=true;loginTimeout=10",
                     dbHost, dbPort);
             
             log.info("🔷 Ensuring database '{}' exists...", dbName);
@@ -82,6 +116,7 @@ public class DatabaseConfig {
             masterConfig.setMaximumPoolSize(1);
             masterConfig.setConnectionTimeout(10000);
             masterConfig.setInitializationFailTimeout(-1); // Don't fail if can't connect immediately
+            masterConfig.setConnectionTestQuery("SELECT 1");
             
             try (HikariDataSource masterDs = new HikariDataSource(masterConfig);
                  java.sql.Connection conn = masterDs.getConnection();
@@ -101,7 +136,23 @@ public class DatabaseConfig {
                 }
             }
         } catch (Exception e) {
-            log.warn("Could not ensure database exists (it may already exist or will be created by Flyway): {}", e.getMessage());
+            // Check if the root cause is a socket/network error
+            Throwable cause = e;
+            while (cause != null && !(cause instanceof java.net.SocketException) && 
+                   !(cause instanceof java.net.ConnectException)) {
+                cause = cause.getCause();
+            }
+            
+            if (cause instanceof java.net.SocketException || cause instanceof java.net.ConnectException) {
+                log.warn("🔷 Could not connect to SQL Server at {}:{} - {}", dbHost, dbPort, cause.getMessage());
+                log.warn("🔷 This is expected if SQL Server is not running. The application will retry connections.");
+                log.warn("🔷 To start SQL Server: docker-compose up -d sqlserver");
+            } else {
+                log.warn("🔷 Could not ensure database exists (it may already exist or will be created by Flyway): {}", e.getMessage());
+                if (e.getCause() != null) {
+                    log.warn("🔷 Root cause: {}", e.getCause().getMessage());
+                }
+            }
         }
     }
 }

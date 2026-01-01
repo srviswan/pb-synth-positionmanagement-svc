@@ -65,14 +65,26 @@
             <artifactId>kafka-avro-serializer</artifactId>
         </dependency>
         
-        <!-- Solace (optional - only needed if using Solace) -->
-        <!--
+        <!-- Solace JMS Spring Boot Starter (required when app.messaging.provider=solace) -->
+        <!-- Note: This is NOT optional - it must be in classpath when using Solace -->
+        <!-- The @ConditionalOnProperty in SolaceConfig ensures it's only used when needed -->
         <dependency>
             <groupId>com.solace.spring.boot</groupId>
             <artifactId>solace-jms-spring-boot-starter</artifactId>
             <version>4.1.0</version>
         </dependency>
-        -->
+        
+        <!-- Spring JMS (required for Solace JMS support) -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jms</artifactId>
+        </dependency>
+        
+        <!-- Jakarta JMS API (required for JMS) -->
+        <dependency>
+            <groupId>jakarta.jms</groupId>
+            <artifactId>jakarta.jms-api</artifactId>
+        </dependency>
         
         <!-- Redis -->
         <dependency>

@@ -43,6 +43,15 @@ spring:
       properties:
         spring.json.trusted.packages: "*"
         enable.auto.commit: false
+  
+  # Solace Configuration (only used when app.messaging.provider=solace)
+  # Note: Solace Spring Boot Starter uses solace.java.* properties
+  solace:
+    java:
+      host: ${SOLACE_HOST:tcp://localhost:55556}
+      msg-vpn: ${SOLACE_VPN:default}
+      client-username: ${SOLACE_USERNAME:admin}
+      client-password: ${SOLACE_PASSWORD:admin}
 
   # Redis Configuration
   data:
@@ -68,6 +77,22 @@ app:
       regulatory-submissions: ${KAFKA_TOPIC_REGULATORY:regulatory-submissions}
   messaging:
     provider: ${MESSAGING_PROVIDER:kafka} # kafka or solace
+  solace:
+    host: ${SOLACE_HOST:localhost}
+    port: ${SOLACE_PORT:55555}
+    vpn: ${SOLACE_VPN:default}
+    username: ${SOLACE_USERNAME:default}
+    password: ${SOLACE_PASSWORD:}
+    client-name: ${SOLACE_CLIENT_NAME:position-management-service}
+    default-destination-type: ${SOLACE_DESTINATION_TYPE:topic} # topic or queue
+    topics:
+      backdated-trades: ${SOLACE_TOPIC_BACKDATED_TRADES:backdated-trades}
+      trade-applied-events: ${SOLACE_TOPIC_TRADE_APPLIED:trade-applied-events}
+      provisional-trade-events: ${SOLACE_TOPIC_PROVISIONAL:provisional-trade-events}
+      historical-position-corrected-events: ${SOLACE_TOPIC_CORRECTED:historical-position-corrected-events}
+      dlq: ${SOLACE_TOPIC_DLQ:trade-events-dlq}
+      error-queue: ${SOLACE_TOPIC_ERROR_QUEUE:trade-events-errors}
+      regulatory-submissions: ${SOLACE_TOPIC_REGULATORY:regulatory-submissions}
   cache:
     provider: ${CACHE_PROVIDER:redis} # redis or memory
 
