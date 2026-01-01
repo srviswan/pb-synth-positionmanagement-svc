@@ -310,22 +310,8 @@ echo "----------------------------------------"
 # Create a backdated trade for recalculation test using the existing position
 BACKDATED_TRADE_ID="API_RECALC_$(date +%s)"
 # Use the same account/instrument as the test trade to ensure position exists
-# IMPORTANT: Use the actual positionKey from the created trade
-if [ -n "$TEST_POSITION_KEY" ] && [ "$TEST_POSITION_KEY" != "fallback_key" ]; then
-    BACKDATED_JSON=$(load_json 'coldpath_backdated.json' | sed "s/BACKDATED_001/$BACKDATED_TRADE_ID/g" 2>/dev/null || \
-      echo "$(load_json 'initial_trade.json' | sed "s/T001/$BACKDATED_TRADE_ID/g" | sed "s/ACC001/$TEST_ACCOUNT/g" | sed "s/AAPL/$TEST_INSTRUMENT/g")")
-    # Update positionKey in JSON using jq if available, otherwise use sed
-    if command -v jq >/dev/null 2>&1; then
-        BACKDATED_JSON=$(echo "$BACKDATED_JSON" | jq --arg pk "$TEST_POSITION_KEY" '.positionKey = $pk')
-    else
-        # Fallback to sed if jq is not available
-        BACKDATED_JSON=$(echo "$BACKDATED_JSON" | sed "s/\"positionKey\":\"[^\"]*\"/\"positionKey\":\"$TEST_POSITION_KEY\"/g" | sed "s/\"positionKey\":\"[^\"]*\"/\"positionKey\":\"$TEST_POSITION_KEY\"/g")
-    fi
-else
-    # Fallback if no position key
-    BACKDATED_JSON=$(load_json 'coldpath_backdated.json' | sed "s/BACKDATED_001/$BACKDATED_TRADE_ID/g" 2>/dev/null || \
-      echo "$(load_json 'initial_trade.json' | sed "s/T001/$BACKDATED_TRADE_ID/g" | sed "s/ACC001/$TEST_ACCOUNT/g" | sed "s/AAPL/$TEST_INSTRUMENT/g")")
-fi
+BACKDATED_JSON=$(load_json 'coldpath_backdated.json' | sed "s/BACKDATED_001/$BACKDATED_TRADE_ID/g" 2>/dev/null || \
+  echo "$(load_json 'initial_trade.json' | sed "s/T001/$BACKDATED_TRADE_ID/g" | sed "s/ACC001/$TEST_ACCOUNT/g" | sed "s/AAPL/$TEST_INSTRUMENT/g")")
 
 # Test sync recalculation endpoint
 RECALC_RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "${BASE_URL}/api/diagnostics/recalculate" \
@@ -348,22 +334,8 @@ fi
 
 # Test async recalculation endpoint (Plan B)
 ASYNC_RECALC_TRADE_ID="API_ASYNC_RECALC_$(date +%s)"
-# Use the actual positionKey from the created trade
-if [ -n "$TEST_POSITION_KEY" ] && [ "$TEST_POSITION_KEY" != "fallback_key" ]; then
-    ASYNC_BACKDATED_JSON=$(load_json 'coldpath_backdated.json' | sed "s/BACKDATED_001/$ASYNC_RECALC_TRADE_ID/g" 2>/dev/null || \
-      echo "$(load_json 'initial_trade.json' | sed "s/T001/$ASYNC_RECALC_TRADE_ID/g" | sed "s/ACC001/$TEST_ACCOUNT/g" | sed "s/AAPL/$TEST_INSTRUMENT/g")")
-    # Update positionKey in JSON using jq if available, otherwise use sed
-    if command -v jq >/dev/null 2>&1; then
-        ASYNC_BACKDATED_JSON=$(echo "$ASYNC_BACKDATED_JSON" | jq --arg pk "$TEST_POSITION_KEY" '.positionKey = $pk')
-    else
-        # Fallback to sed if jq is not available
-        ASYNC_BACKDATED_JSON=$(echo "$ASYNC_BACKDATED_JSON" | sed "s/\"positionKey\":\"[^\"]*\"/\"positionKey\":\"$TEST_POSITION_KEY\"/g")
-    fi
-else
-    # Fallback if no position key
-    ASYNC_BACKDATED_JSON=$(load_json 'coldpath_backdated.json' | sed "s/BACKDATED_001/$ASYNC_RECALC_TRADE_ID/g" 2>/dev/null || \
-      echo "$(load_json 'initial_trade.json' | sed "s/T001/$ASYNC_RECALC_TRADE_ID/g" | sed "s/ACC001/$TEST_ACCOUNT/g" | sed "s/AAPL/$TEST_INSTRUMENT/g")")
-fi
+ASYNC_BACKDATED_JSON=$(load_json 'coldpath_backdated.json' | sed "s/BACKDATED_001/$ASYNC_RECALC_TRADE_ID/g" 2>/dev/null || \
+  echo "$(load_json 'initial_trade.json' | sed "s/T001/$ASYNC_RECALC_TRADE_ID/g" | sed "s/ACC001/$TEST_ACCOUNT/g" | sed "s/AAPL/$TEST_INSTRUMENT/g")")
 
 ASYNC_RECALC_RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "${BASE_URL}/api/diagnostics/recalculate/async" \
   -H "Content-Type: application/json" \

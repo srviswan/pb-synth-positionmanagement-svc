@@ -3,7 +3,6 @@ package com.bank.esps.api.controller;
 import com.bank.esps.application.service.EventStoreService;
 import com.bank.esps.application.service.ColdpathRecalculationService;
 import com.bank.esps.domain.event.TradeEvent;
-import com.bank.esps.domain.messaging.MessageProducer;
 import com.bank.esps.infrastructure.persistence.entity.EventEntity;
 import com.bank.esps.infrastructure.persistence.entity.SnapshotEntity;
 import com.bank.esps.infrastructure.persistence.repository.EventStoreRepository;
@@ -34,23 +33,17 @@ public class EventStoreController {
     private final EventStoreService eventStoreService;
     private final ColdpathRecalculationService coldpathRecalculationService;
     private final ObjectMapper objectMapper;
-    private final MessageProducer messageProducer;
-    
-    @org.springframework.beans.factory.annotation.Value("${app.kafka.topics.backdated-trades:backdated-trades}")
-    private String backdatedTradesTopic;
     
     public EventStoreController(EventStoreRepository eventStoreRepository,
                               SnapshotRepository snapshotRepository,
                               EventStoreService eventStoreService,
                               ColdpathRecalculationService coldpathRecalculationService,
-                              ObjectMapper objectMapper,
-                              MessageProducer messageProducer) {
+                              ObjectMapper objectMapper) {
         this.eventStoreRepository = eventStoreRepository;
         this.snapshotRepository = snapshotRepository;
         this.eventStoreService = eventStoreService;
         this.coldpathRecalculationService = coldpathRecalculationService;
         this.objectMapper = objectMapper;
-        this.messageProducer = messageProducer;
     }
     
     @GetMapping("/events/count")
@@ -163,15 +156,6 @@ public class EventStoreController {
                 return ResponseEntity.badRequest().body(response);
             }
             
-            // Check if position exists before attempting recalculation
-            List<EventEntity> existingEvents = eventStoreService.getEvents(tradeEvent.getPositionKey());
-            if (existingEvents.isEmpty()) {
-                Map<String, Object> response = new HashMap<>();
-                response.put("status", "error");
-                response.put("message", "Position does not exist. Cannot recalculate a position with no events.");
-                return ResponseEntity.badRequest().body(response);
-            }
-            
             coldpathRecalculationService.recalculatePosition(tradeEvent);
             
             Map<String, Object> response = new HashMap<>();
@@ -184,77 +168,15 @@ public class EventStoreController {
             response.put("status", "error");
             response.put("message", e.getMessage());
             return ResponseEntity.badRequest().body(response);
-        } catch (org.springframework.transaction.TransactionSystemException e) {
-            log.error("Transaction error during recalculation", e);
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "error");
-            response.put("message", "Transaction error during recalculation");
-            if (e.getCause() != null) {
-                response.put("details", e.getCause().getMessage());
-            }
-            return ResponseEntity.internalServerError().body(response);
         } catch (Exception e) {
             log.error("Error triggering recalculation", e);
             Map<String, Object> response = new HashMap<>();
             response.put("status", "error");
-            String errorMessage = e.getMessage();
-            if (errorMessage != null && errorMessage.contains("rollback")) {
-                errorMessage = "Transaction rollback error - the position may not exist or may be in an invalid state";
+            response.put("message", e.getMessage() != null ? e.getMessage() : "Internal server error during recalculation");
+            // Check if it's a transaction/connection error
+            if (e.getMessage() != null && e.getMessage().contains("rollback")) {
+                response.put("details", "Transaction rollback error - this may occur if the position does not exist or is in an invalid state");
             }
-            response.put("message", errorMessage != null ? errorMessage : "Internal server error during recalculation");
-            return ResponseEntity.internalServerError().body(response);
-        }
-    }
-    
-    /**
-     * Async recalculation endpoint - publishes trade to backdated-trades topic
-     * This is a Plan B approach that avoids transaction rollback issues
-     */
-    @PostMapping("/recalculate/async")
-    public ResponseEntity<Map<String, Object>> triggerAsyncRecalculation(@RequestBody TradeEvent tradeEvent) {
-        try {
-            log.info("Async recalculation triggered for trade: {}", tradeEvent.getTradeId());
-            
-            // Validate required fields
-            if (tradeEvent.getPositionKey() == null || tradeEvent.getPositionKey().trim().isEmpty()) {
-                Map<String, Object> response = new HashMap<>();
-                response.put("status", "error");
-                response.put("message", "Position key is required for recalculation");
-                return ResponseEntity.badRequest().body(response);
-            }
-            
-            // Validate that position exists
-            List<EventEntity> existingEvents = eventStoreService.getEvents(tradeEvent.getPositionKey());
-            if (existingEvents.isEmpty()) {
-                Map<String, Object> response = new HashMap<>();
-                response.put("status", "error");
-                response.put("message", "Position does not exist. Cannot recalculate a position with no events.");
-                return ResponseEntity.badRequest().body(response);
-            }
-            
-            // Serialize trade event to JSON
-            String tradeJson = objectMapper.writeValueAsString(tradeEvent);
-            
-            // Publish to backdated-trades topic (will be processed by KafkaListener)
-            messageProducer.send(backdatedTradesTopic, tradeEvent.getPositionKey(), tradeJson);
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "accepted");
-            response.put("message", "Recalculation request queued for async processing. Trade: " + tradeEvent.getTradeId());
-            response.put("tradeId", tradeEvent.getTradeId());
-            response.put("positionKey", tradeEvent.getPositionKey());
-            return ResponseEntity.accepted().body(response);
-        } catch (IllegalArgumentException e) {
-            log.warn("Invalid request for async recalculation: {}", e.getMessage());
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "error");
-            response.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(response);
-        } catch (Exception e) {
-            log.error("Error triggering async recalculation", e);
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "error");
-            response.put("message", e.getMessage() != null ? e.getMessage() : "Internal server error during async recalculation");
             return ResponseEntity.internalServerError().body(response);
         }
     }

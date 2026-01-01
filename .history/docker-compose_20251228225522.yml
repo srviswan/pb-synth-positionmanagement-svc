@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  # Solace PubSub+ Event Broker
+  solace:
+    image: solace/solace-pubsub-standard:latest
+    container_name: solace-broker
+    shm_size: '1gb'
+    ulimits:
+      nofile:
+        soft: 2448
+        hard: 38048
+    ports:
+      - "8081:8080"   # Solace Management UI (using 8081 to avoid conflict with app on 8080)
+      - "55555:55555" # SMF (Solace Message Format) - JMS
+      - "8008:8008"   # Management API
+      - "1883:1883"   # MQTT
+      - "9000:9000"   # Internal
+    environment:
+      - username_admin_globalaccesslevel=admin
+      - username_admin_password=admin
+      - system_scaling_maxconnectioncount=100
+      - system_scaling_maxqueuemessagecount=1000
+    volumes:
+      - solace-data:/var/lib/solace
+    networks:
+      - position-mgmt-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5550/health-check/guaranteed-messaging || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: position-mgmt-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "Test@123456"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P Test@123456 -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - position-mgmt-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: position-mgmt-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - position-mgmt-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: position-mgmt-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - position-mgmt-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: position-mgmt-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - position-mgmt-network
+
+volumes:
+  sqlserver_data:
+  solace-data:
+
+networks:
+  position-mgmt-network:
+    driver: bridge

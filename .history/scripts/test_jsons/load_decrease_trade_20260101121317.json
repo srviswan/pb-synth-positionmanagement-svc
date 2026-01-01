@@ -1,0 +1,10 @@
+{
+  "tradeId": "LOAD_DEC_001",
+  "account": "LOAD_ACC_001",
+  "instrument": "AAPL",
+  "currency": "USD",
+  "quantity": -50,
+  "price": 155.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

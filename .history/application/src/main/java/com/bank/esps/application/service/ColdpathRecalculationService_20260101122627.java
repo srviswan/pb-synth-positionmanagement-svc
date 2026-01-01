@@ -12,10 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -133,76 +130,34 @@ public class ColdpathRecalculationService {
             provisionalState = eventStoreService.loadSnapshot(positionKey);
             
             // 6. Override provisional snapshot with corrected version
-            // Use REQUIRES_NEW to isolate this transaction and prevent rollback issues
-            saveSnapshotInNewTransaction(positionKey, correctedState);
+            eventStoreService.saveSnapshot(positionKey, correctedState, 
+                    ReconciliationStatus.RECONCILED, null);
             
             // Record metrics
             metricsService.recordCorrection();
             
-            // Register transaction synchronization to execute after commit (only if transaction is active)
-            if (TransactionSynchronizationManager.isActualTransactionActive()) {
-                final PositionState finalCorrectedState = correctedState;
-                final PositionState finalProvisionalState = provisionalState;
-                final String finalPositionKey = positionKey;
-                
-                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        try {
-                            // 7. Update cache (after transaction commits to avoid connection issues)
-                            if (finalPositionKey != null && finalCorrectedState != null) {
-                                cacheService.put("position:" + finalPositionKey, finalCorrectedState);
-                            }
-                            
-                            // 8. Publish correction event (after transaction commits to avoid connection issues)
-                            if (finalCorrectedState != null) {
-                                publishCorrectionEvent(backdatedTrade, finalCorrectedState, finalProvisionalState);
-                            }
-                        } catch (Exception e) {
-                            log.warn("Error in post-commit operations for recalculation: {}", e.getMessage(), e);
-                        }
-                    }
-                });
-            } else {
-                // If no transaction, execute immediately
-                try {
-                    cacheService.put("position:" + positionKey, correctedState);
-                    publishCorrectionEvent(backdatedTrade, correctedState, provisionalState);
-                } catch (Exception e) {
-                    log.warn("Error in post-transaction operations for recalculation: {}", e.getMessage(), e);
-                }
-            }
-            
             log.info("Completed recalculation for backdated trade: tradeId={}, positionKey={}, version={}", 
                     backdatedTrade.getTradeId(), positionKey, nextVersion);
-        } catch (IllegalArgumentException e) {
-            log.error("Invalid argument during recalculation for trade: {}, positionKey: {}", 
-                    backdatedTrade.getTradeId(), positionKey, e);
-            throw e; // Re-throw validation errors
         } catch (Exception e) {
-            log.error("Error during recalculation for trade: {}, positionKey: {}, error type: {}, message: {}", 
-                    backdatedTrade.getTradeId(), positionKey, e.getClass().getName(), e.getMessage(), e);
-            // Log the full stack trace for debugging
-            if (e.getCause() != null) {
-                log.error("Root cause: {}", e.getCause().getMessage(), e.getCause());
-            }
+            log.error("Error during recalculation for trade: {}, positionKey: {}", 
+                    backdatedTrade.getTradeId(), positionKey, e);
             throw e; // Re-throw to trigger rollback
         } finally {
             metricsService.recordColdpathProcessing(processingSample);
-        }
-    }
-    
-    /**
-     * Save snapshot in a new transaction to isolate it and prevent rollback issues
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    private void saveSnapshotInNewTransaction(String positionKey, PositionState correctedState) {
-        try {
-            eventStoreService.saveSnapshot(positionKey, correctedState, 
-                    ReconciliationStatus.RECONCILED, null);
-        } catch (Exception e) {
-            log.error("Error saving snapshot in new transaction for position: {}", positionKey, e);
-            throw e;
+            
+            // 7. Update cache (after transaction commits to avoid connection issues)
+            if (positionKey != null && correctedState != null) {
+                try {
+                    cacheService.put("position:" + positionKey, correctedState);
+                } catch (Exception e) {
+                    log.warn("Failed to update cache for position: {}", positionKey, e);
+                }
+            }
+            
+            // 8. Publish correction event (after transaction commits to avoid connection issues)
+            if (correctedState != null) {
+                publishCorrectionEvent(backdatedTrade, correctedState, provisionalState);
+            }
         }
     }
     
