@@ -1,0 +1,10 @@
+{
+  "tradeId": "LOAD_NEW_001",
+  "account": "LOAD_ACC_001",
+  "instrument": "MSFT",
+  "currency": "USD",
+  "quantity": 200,
+  "price": 300.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}
