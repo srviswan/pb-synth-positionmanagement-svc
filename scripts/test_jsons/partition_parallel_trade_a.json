@@ -1,0 +1,10 @@
+{
+  "tradeId": "PART_PARALLEL_A",
+  "account": "ACC012",
+  "instrument": "QQQ",
+  "currency": "USD",
+  "quantity": 100,
+  "price": 350.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

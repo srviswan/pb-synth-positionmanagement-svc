@@ -1,0 +1,10 @@
+{
+  "tradeId": "PART_PARALLEL_B",
+  "account": "ACC013",
+  "instrument": "IWM",
+  "currency": "USD",
+  "quantity": 200,
+  "price": 180.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

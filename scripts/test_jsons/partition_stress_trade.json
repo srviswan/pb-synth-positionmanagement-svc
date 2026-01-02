@@ -1,0 +1,10 @@
+{
+  "tradeId": "PART_STRESS",
+  "account": "ACC015",
+  "instrument": "TLT",
+  "currency": "USD",
+  "quantity": 10,
+  "price": 95.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

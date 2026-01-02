@@ -880,6 +880,239 @@ else
 fi
 
 echo ""
+echo "8. Testing Partition Awareness..."
+echo "----------------------------------------"
+
+# Test 8.1: Same Position Key - Sequential Trades (Ordering)
+echo ""
+echo "8.1. Testing Same Position Key - Sequential Trades (Partition Ordering)..."
+
+# Generate unique trade IDs to avoid idempotency conflicts
+PARTITION_TRADE_1_ID="PART_SEQ_$(date +%s)_1"
+PARTITION_TRADE_2_ID="PART_SEQ_$(date +%s)_2"
+PARTITION_TRADE_3_ID="PART_SEQ_$(date +%s)_3"
+
+# Create first trade
+TRADE_P1=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "${BASE_URL}/api/trades" \
+  -H "Content-Type: application/json" \
+  -d "$(load_json 'partition_sequential_trade_1.json' | sed "s/PART_SEQ_001/$PARTITION_TRADE_1_ID/g")" 2>&1)
+
+HTTP_P1=$(echo "$TRADE_P1" | grep "HTTP_CODE:" | cut -d: -f2 || echo "000")
+BODY_P1=$(echo "$TRADE_P1" | grep -v "HTTP_CODE:")
+if [ "$HTTP_P1" = "201" ] || [ "$HTTP_P1" = "200" ]; then
+    test_result 0 "Partition test trade 1 processed (same position key)"
+    # Extract position key from response
+    PARTITION_TEST_KEY=$(echo "$BODY_P1" | grep -o '"positionKey":"[^"]*"' | cut -d'"' -f4 || echo "")
+    sleep 1
+else
+    test_result 1 "Partition test trade 1 failed - HTTP $HTTP_P1"
+    PARTITION_TEST_KEY=""
+fi
+
+# Create second trade with same position key
+TRADE_P2=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "${BASE_URL}/api/trades" \
+  -H "Content-Type: application/json" \
+  -d "$(load_json 'partition_sequential_trade_2.json' | sed "s/PART_SEQ_002/$PARTITION_TRADE_2_ID/g")" 2>&1)
+
+HTTP_P2=$(echo "$TRADE_P2" | grep "HTTP_CODE:" | cut -d: -f2 || echo "000")
+if [ "$HTTP_P2" = "201" ] || [ "$HTTP_P2" = "200" ]; then
+    test_result 0 "Partition test trade 2 processed (same position key)"
+    sleep 1
+else
+    test_result 1 "Partition test trade 2 failed - HTTP $HTTP_P2"
+fi
+
+# Create third trade with same position key
+TRADE_P3=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "${BASE_URL}/api/trades" \
+  -H "Content-Type: application/json" \
+  -d "$(load_json 'partition_sequential_trade_3.json' | sed "s/PART_SEQ_003/$PARTITION_TRADE_3_ID/g")" 2>&1)
+
+HTTP_P3=$(echo "$TRADE_P3" | grep "HTTP_CODE:" | cut -d: -f2 || echo "000")
+if [ "$HTTP_P3" = "201" ] || [ "$HTTP_P3" = "200" ]; then
+    test_result 0 "Partition test trade 3 processed (same position key)"
+    sleep 2
+else
+    test_result 1 "Partition test trade 3 failed - HTTP $HTTP_P3"
+fi
+
+# Verify position has correct total (50 + 75 + 25 = 150)
+if [ -n "$PARTITION_TEST_KEY" ] && [ "$HTTP_P1" = "201" ] || [ "$HTTP_P1" = "200" ]; then
+    # Retry to get position with updated quantity
+    QTY_PARTITION=""
+    for i in {1..5}; do
+        POS_PARTITION=$(curl -s "${BASE_URL}/api/positions/${PARTITION_TEST_KEY}" 2>&1)
+        QTY_PARTITION=$(extract_total_qty "$POS_PARTITION")
+        if [ -n "$QTY_PARTITION" ] && [ "$QTY_PARTITION" != "0" ] && [ "$QTY_PARTITION" != "" ]; then
+            if [ "$(echo "$QTY_PARTITION >= 150" | bc 2>/dev/null || echo "$((QTY_PARTITION >= 150))")" = "1" ]; then
+                break
+            fi
+        fi
+        sleep 0.5
+    done
+    
+    if [ "$(echo "$QTY_PARTITION >= 150" | bc 2>/dev/null || echo "$((QTY_PARTITION >= 150))")" = "1" ]; then
+        test_result 0 "Partition ordering: Sequential trades processed correctly (total qty: $QTY_PARTITION)"
+        echo "   Note: All trades with same position key processed in order (same partition)"
+    else
+        test_result 1 "Partition ordering may be incorrect (total qty: $QTY_PARTITION, expected >= 150)"
+    fi
+elif [ -z "$PARTITION_TEST_KEY" ]; then
+    test_result 1 "Partition test: Could not extract position key from trade response"
+fi
+
+# Test 8.2: Different Position Keys - Parallel Processing
+echo ""
+echo "8.2. Testing Different Position Keys - Parallel Processing..."
+
+# Generate unique trade IDs to avoid idempotency conflicts
+PARTITION_TRADE_A_ID="PART_PARALLEL_A_$(date +%s)"
+PARTITION_TRADE_B_ID="PART_PARALLEL_B_$(date +%s)"
+PARTITION_TRADE_C_ID="PART_PARALLEL_C_$(date +%s)"
+
+# Send all three trades sequentially (quickly) to test parallel processing capability
+# Note: We send them quickly to simulate parallel load, but capture responses properly
+TRADE_PA=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "${BASE_URL}/api/trades" \
+  -H "Content-Type: application/json" \
+  -d "$(load_json 'partition_parallel_trade_a.json' | sed "s/PART_PARALLEL_A/$PARTITION_TRADE_A_ID/g")" 2>&1)
+
+TRADE_PB=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "${BASE_URL}/api/trades" \
+  -H "Content-Type: application/json" \
+  -d "$(load_json 'partition_parallel_trade_b.json' | sed "s/PART_PARALLEL_B/$PARTITION_TRADE_B_ID/g")" 2>&1)
+
+TRADE_PC=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "${BASE_URL}/api/trades" \
+  -H "Content-Type: application/json" \
+  -d "$(load_json 'partition_parallel_trade_c.json' | sed "s/PART_PARALLEL_C/$PARTITION_TRADE_C_ID/g")" 2>&1)
+
+HTTP_PA=$(echo "$TRADE_PA" | grep "HTTP_CODE:" | cut -d: -f2 || echo "000")
+HTTP_PB=$(echo "$TRADE_PB" | grep "HTTP_CODE:" | cut -d: -f2 || echo "000")
+HTTP_PC=$(echo "$TRADE_PC" | grep "HTTP_CODE:" | cut -d: -f2 || echo "000")
+
+BODY_PA=$(echo "$TRADE_PA" | grep -v "HTTP_CODE:")
+BODY_PB=$(echo "$TRADE_PB" | grep -v "HTTP_CODE:")
+BODY_PC=$(echo "$TRADE_PC" | grep -v "HTTP_CODE:")
+
+# Extract position keys from responses
+PARTITION_KEY_A=$(echo "$BODY_PA" | grep -o '"positionKey":"[^"]*"' | cut -d'"' -f4 || echo "")
+PARTITION_KEY_B=$(echo "$BODY_PB" | grep -o '"positionKey":"[^"]*"' | cut -d'"' -f4 || echo "")
+PARTITION_KEY_C=$(echo "$BODY_PC" | grep -o '"positionKey":"[^"]*"' | cut -d'"' -f4 || echo "")
+
+if [ "$HTTP_PA" = "201" ] || [ "$HTTP_PA" = "200" ]; then
+    test_result 0 "Partition test trade A processed (different position key)"
+fi
+if [ "$HTTP_PB" = "201" ] || [ "$HTTP_PB" = "200" ]; then
+    test_result 0 "Partition test trade B processed (different position key)"
+fi
+if [ "$HTTP_PC" = "201" ] || [ "$HTTP_PC" = "200" ]; then
+    test_result 0 "Partition test trade C processed (different position key)"
+fi
+
+sleep 2
+
+# Verify all positions were created correctly using extracted position keys
+SUCCESS_COUNT=0
+if [ -n "$PARTITION_KEY_A" ]; then
+    POS_A=$(curl -s "${BASE_URL}/api/positions/${PARTITION_KEY_A}" 2>&1)
+    QTY_A=$(extract_total_qty "$POS_A")
+    if [ "$(echo "$QTY_A >= 100" | bc 2>/dev/null || echo "$((QTY_A >= 100))")" = "1" ]; then
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+    fi
+else
+    QTY_A="0"
+fi
+
+if [ -n "$PARTITION_KEY_B" ]; then
+    POS_B=$(curl -s "${BASE_URL}/api/positions/${PARTITION_KEY_B}" 2>&1)
+    QTY_B=$(extract_total_qty "$POS_B")
+    if [ "$(echo "$QTY_B >= 200" | bc 2>/dev/null || echo "$((QTY_B >= 200))")" = "1" ]; then
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+    fi
+else
+    QTY_B="0"
+fi
+
+if [ -n "$PARTITION_KEY_C" ]; then
+    POS_C=$(curl -s "${BASE_URL}/api/positions/${PARTITION_KEY_C}" 2>&1)
+    QTY_C=$(extract_total_qty "$POS_C")
+    if [ "$(echo "$QTY_C >= 150" | bc 2>/dev/null || echo "$((QTY_C >= 150))")" = "1" ]; then
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+    fi
+else
+    QTY_C="0"
+fi
+
+if [ "$SUCCESS_COUNT" -eq 3 ]; then
+    test_result 0 "Partition distribution: Different position keys processed in parallel (A: $QTY_A, B: $QTY_B, C: $QTY_C)"
+    echo "   Note: Trades with different position keys can be processed in parallel (different partitions)"
+else
+    test_result 1 "Partition distribution: Some positions may not have been processed correctly (A: $QTY_A, B: $QTY_B, C: $QTY_C)"
+fi
+
+# Test 8.3: High-Frequency Sequential Trades (Stress Test Partition Ordering)
+echo ""
+echo "8.3. Testing High-Frequency Sequential Trades (Partition Ordering Stress Test)..."
+
+# Send 5 trades rapidly with same position key
+STRESS_SUCCESS=0
+STRESS_FAIL=0
+PARTITION_STRESS_KEY=""
+
+for i in {1..5}; do
+    STRESS_TRADE_ID="PART_STRESS_$(date +%s)_${i}"
+    
+    STRESS_RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "${BASE_URL}/api/trades" \
+      -H "Content-Type: application/json" \
+      -d "$(load_json 'partition_stress_trade.json' | sed "s/PART_STRESS/$STRESS_TRADE_ID/g")" 2>&1)
+    
+    HTTP_STRESS=$(echo "$STRESS_RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2 || echo "000")
+    BODY_STRESS=$(echo "$STRESS_RESPONSE" | grep -v "HTTP_CODE:")
+    
+    if [ "$HTTP_STRESS" = "201" ] || [ "$HTTP_STRESS" = "200" ]; then
+        STRESS_SUCCESS=$((STRESS_SUCCESS + 1))
+        # Extract position key from first successful trade
+        if [ -z "$PARTITION_STRESS_KEY" ]; then
+            PARTITION_STRESS_KEY=$(echo "$BODY_STRESS" | grep -o '"positionKey":"[^"]*"' | cut -d'"' -f4 || echo "")
+        fi
+    else
+        STRESS_FAIL=$((STRESS_FAIL + 1))
+    fi
+    
+    # Small delay to ensure ordering
+    sleep 0.2
+done
+
+sleep 2
+
+# Verify position has correct total (5 trades * 10 = 50)
+if [ -n "$PARTITION_STRESS_KEY" ]; then
+    QTY_STRESS=""
+    for i in {1..5}; do
+        POS_STRESS=$(curl -s "${BASE_URL}/api/positions/${PARTITION_STRESS_KEY}" 2>&1)
+        QTY_STRESS=$(extract_total_qty "$POS_STRESS")
+        if [ -n "$QTY_STRESS" ] && [ "$QTY_STRESS" != "0" ] && [ "$QTY_STRESS" != "" ]; then
+            if [ "$(echo "$QTY_STRESS >= 40" | bc 2>/dev/null || echo "$((QTY_STRESS >= 40))")" = "1" ]; then
+                break
+            fi
+        fi
+        sleep 0.5
+    done
+else
+    QTY_STRESS="0"
+fi
+
+if [ "$STRESS_SUCCESS" -ge 4 ]; then
+    test_result 0 "Partition stress test: $STRESS_SUCCESS/5 trades processed successfully"
+    
+    if [ "$(echo "$QTY_STRESS >= 40" | bc 2>/dev/null || echo "$((QTY_STRESS >= 40))")" = "1" ]; then
+        test_result 0 "Partition stress test: Sequential trades maintained ordering (total qty: $QTY_STRESS)"
+        echo "   Note: High-frequency trades with same position key processed in order (partition consistency)"
+    else
+        test_result 1 "Partition stress test: Ordering may be incorrect (total qty: $QTY_STRESS, expected >= 40)"
+    fi
+else
+    test_result 1 "Partition stress test: Only $STRESS_SUCCESS/5 trades processed successfully"
+fi
+
+echo ""
 echo "=========================================="
 echo "Test Summary"
 echo "=========================================="

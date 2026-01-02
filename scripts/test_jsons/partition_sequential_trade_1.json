@@ -1,0 +1,10 @@
+{
+  "tradeId": "PART_SEQ_001",
+  "account": "ACC011",
+  "instrument": "SPY",
+  "currency": "USD",
+  "quantity": 50,
+  "price": 400.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}

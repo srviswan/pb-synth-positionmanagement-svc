@@ -1,0 +1,10 @@
+{
+  "tradeId": "PART_PARALLEL_C",
+  "account": "ACC014",
+  "instrument": "DIA",
+  "currency": "USD",
+  "quantity": 150,
+  "price": 320.00,
+  "tradeDate": "CURRENT_DATE",
+  "effectiveDate": "CURRENT_DATE"
+}
