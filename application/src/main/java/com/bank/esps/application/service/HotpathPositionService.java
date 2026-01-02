@@ -259,6 +259,7 @@ public class HotpathPositionService {
             currentState = new PositionState(
                     tradeEvent.getPositionKey(),
                     tradeEvent.getAccount(),
+                    tradeEvent.getBook(),
                     tradeEvent.getInstrument(),
                     tradeEvent.getCurrency()
             );
@@ -417,6 +418,7 @@ public class HotpathPositionService {
         PositionState newState = new PositionState(
                 newPositionKey,
                 tradeEvent.getAccount(),
+                tradeEvent.getBook(),
                 tradeEvent.getInstrument(),
                 tradeEvent.getCurrency());
         

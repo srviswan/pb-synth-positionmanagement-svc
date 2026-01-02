@@ -191,12 +191,12 @@ public class EventStoreController {
                 return ResponseEntity.badRequest().body(response);
             }
             
-            // Check account access if applicable
-            if (userContext != null && tradeEvent.getAccount() != null) {
-                if (!authorizationService.hasAccountAccess(userContext.getUserId(), tradeEvent.getAccount())) {
+            // Check book access if applicable
+            if (userContext != null && tradeEvent.getBook() != null) {
+                if (!authorizationService.hasBookAccess(userContext.getUserId(), tradeEvent.getBook())) {
                     Map<String, Object> response = new HashMap<>();
                     response.put("status", "error");
-                    response.put("message", "User does not have access to account: " + tradeEvent.getAccount());
+                    response.put("message", "User does not have access to book: " + tradeEvent.getBook());
                     return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).body(response);
                 }
             }
@@ -269,12 +269,12 @@ public class EventStoreController {
                 return ResponseEntity.badRequest().body(response);
             }
             
-            // Check account access if applicable
-            if (userContext != null && tradeEvent.getAccount() != null) {
-                if (!authorizationService.hasAccountAccess(userContext.getUserId(), tradeEvent.getAccount())) {
+            // Check book access if applicable
+            if (userContext != null && tradeEvent.getBook() != null) {
+                if (!authorizationService.hasBookAccess(userContext.getUserId(), tradeEvent.getBook())) {
                     Map<String, Object> response = new HashMap<>();
                     response.put("status", "error");
-                    response.put("message", "User does not have access to account: " + tradeEvent.getAccount());
+                    response.put("message", "User does not have access to book: " + tradeEvent.getBook());
                     return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).body(response);
                 }
             }

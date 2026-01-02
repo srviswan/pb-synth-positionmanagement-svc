@@ -274,7 +274,7 @@ public class ColdpathRecalculationService {
      * Replay events in chronological order to recalculate position
      */
     private PositionState replayEvents(List<EventEntity> events, String positionKey) {
-        PositionState state = new PositionState(positionKey, "", "", "");
+        PositionState state = new PositionState(positionKey, "", "", "", "");
         
         // Sort by effective date, then by occurredAt timestamp, then by version
         // This ensures backdated trades (midnight timestamp) are processed before same-date events
@@ -304,6 +304,7 @@ public class ColdpathRecalculationService {
             currentState = new PositionState(
                     tradeEvent.getPositionKey(),
                     tradeEvent.getAccount(),
+                    tradeEvent.getBook(),
                     tradeEvent.getInstrument(),
                     tradeEvent.getCurrency()
             );

@@ -18,6 +18,7 @@ import java.time.LocalDate;
 public class TradeEvent {
     private String tradeId;
     private String account;
+    private String book; // Book ID for book-level access control
     private String instrument;
     private String currency;
     private BigDecimal quantity;

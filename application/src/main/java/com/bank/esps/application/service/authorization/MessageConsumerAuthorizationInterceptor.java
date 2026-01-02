@@ -47,16 +47,13 @@ public class MessageConsumerAuthorizationInterceptor {
         try {
             TradeEvent tradeEvent = objectMapper.readValue(messageJson, TradeEvent.class);
             
-            // Check account access
-            if (tradeEvent.getAccount() != null && 
-                !authorizationService.hasAccountAccess(userId, tradeEvent.getAccount())) {
-                log.warn("User {} does not have access to account {}", 
-                    userId, tradeEvent.getAccount());
+            // Check book access
+            if (tradeEvent.getBook() != null && 
+                !authorizationService.hasBookAccess(userId, tradeEvent.getBook())) {
+                log.warn("User {} does not have access to book {}", 
+                    userId, tradeEvent.getBook());
                 return false;
             }
-            
-            // Check book access if applicable
-            // Note: TradeEvent may not have bookId, but if it does, check it
             
         } catch (Exception e) {
             // If we can't parse the event, allow it (fail open for backward compatibility)

@@ -19,6 +19,7 @@ import java.util.List;
 public class PositionState {
     private String positionKey;
     private String account;
+    private String book; // Book ID for book-level access control
     private String instrument;
     private String currency;
     private List<TaxLot> openLots;
@@ -29,6 +30,16 @@ public class PositionState {
     public PositionState(String positionKey, String account, String instrument, String currency) {
         this.positionKey = positionKey;
         this.account = account;
+        this.instrument = instrument;
+        this.currency = currency;
+        this.openLots = new ArrayList<>();
+        this.version = 0;
+    }
+    
+    public PositionState(String positionKey, String account, String book, String instrument, String currency) {
+        this.positionKey = positionKey;
+        this.account = account;
+        this.book = book;
         this.instrument = instrument;
         this.currency = currency;
         this.openLots = new ArrayList<>();

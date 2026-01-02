@@ -54,11 +54,11 @@ public class PositionController {
         if (userContext != null) {
             PositionState position = positionService.getCurrentState(positionKey);
             if (position != null) {
-                // Check account access if position has account
-                if (position.getAccount() != null && 
-                    !authorizationService.hasAccountAccess(userContext.getUserId(), position.getAccount())) {
-                    log.warn("User {} denied access to position {} (account: {})", 
-                        userContext.getUserId(), positionKey, position.getAccount());
+                // Check book access if position has book
+                if (position.getBook() != null && 
+                    !authorizationService.hasBookAccess(userContext.getUserId(), position.getBook())) {
+                    log.warn("User {} denied access to position {} (book: {})", 
+                        userContext.getUserId(), positionKey, position.getBook());
                     return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).build();
                 }
             }

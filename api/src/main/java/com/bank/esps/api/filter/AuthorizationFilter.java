@@ -125,10 +125,9 @@ public class AuthorizationFilter extends OncePerRequestFilter {
             return;
         }
         
-        // Check data access if applicable (account, book)
+        // Check data access if applicable (book)
         if (request.getMethod().equals("POST") || request.getMethod().equals("PUT")) {
-            // For write operations, check account access from request body
-            // This will be checked again in the controller
+            // For write operations, check book access from request body (done in controllers)
         }
         
         // Store user context in request attribute for use in controllers

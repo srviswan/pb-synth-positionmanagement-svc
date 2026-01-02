@@ -74,9 +74,9 @@ This document describes the authorization implementation for the Position Manage
   - `POST /api/diagnostics/recalculate` → `DIAGNOSTICS_RECALCULATE`
 
 #### Controller Updates
-- **TradeController**: Checks `TRADE_CREATE` entitlement and account access
-- **PositionController**: Checks `POSITION_VIEW` entitlement and account access
-- **EventStoreController**: Checks `DIAGNOSTICS_RECALCULATE` entitlement and account access
+- **TradeController**: Checks `TRADE_CREATE` entitlement and book access
+- **PositionController**: Checks `POSITION_VIEW` entitlement and book access
+- **EventStoreController**: Checks `DIAGNOSTICS_RECALCULATE` entitlement and book access
 
 ### 4. Messaging-Level Authorization
 
@@ -175,13 +175,10 @@ app:
 
 ## Data Access Control
 
-### Account-Level Access
-- Users can only access positions/trades for accounts they have access to
-- Checked via `authorizationService.hasAccountAccess(userId, accountId)`
-
 ### Book-Level Access
 - Users can only access positions/trades for books they have access to
 - Checked via `authorizationService.hasBookAccess(userId, bookId)`
+- Book information is stored in `TradeEvent.book` and `PositionState.book` fields
 
 ## Development Mode
 
@@ -231,7 +228,7 @@ GET /api/v1/users/{userId}/context
 
 ### Current Implementation
 - ✅ Function-level entitlements checked
-- ✅ Account-level access control
+- ✅ Book-level access control (primary data access control)
 - ✅ User context extraction from JWT/headers
 - ✅ Authorization filter for all API requests
 - ✅ User context in message headers
@@ -253,7 +250,7 @@ GET /api/v1/users/{userId}/context
 2. Test with X-User-Id header
 3. Test with missing authorization (should return 401)
 4. Test with insufficient permissions (should return 403)
-5. Test account access restrictions
+5. Test book access restrictions
 
 ### Configuration for Testing
 ```bash

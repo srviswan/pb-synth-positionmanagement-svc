@@ -68,11 +68,11 @@ public class TradeController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
             
-            // Check account access
-            if (tradeEvent.getAccount() != null && 
-                !authorizationService.hasAccountAccess(userContext.getUserId(), tradeEvent.getAccount())) {
-                log.warn("User {} denied access to account {}", 
-                    userContext.getUserId(), tradeEvent.getAccount());
+            // Check book access
+            if (tradeEvent.getBook() != null && 
+                !authorizationService.hasBookAccess(userContext.getUserId(), tradeEvent.getBook())) {
+                log.warn("User {} denied access to book {}", 
+                    userContext.getUserId(), tradeEvent.getBook());
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
             
