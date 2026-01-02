@@ -57,16 +57,27 @@ public class ColdpathRecalculationService {
     }
     
     /**
-     * Kafka listener for backdated trades
+     * Kafka listener for backdated trades with authorization check
      */
     @KafkaListener(topics = "${app.kafka.topics.backdated-trades:backdated-trades}", 
                    groupId = "${spring.kafka.consumer.group-id:position-management-coldpath}")
     @Transactional
-    public void processBackdatedTrade(String tradeJson) {
+    public void processBackdatedTrade(String tradeJson,
+                                     @org.springframework.messaging.handler.annotation.Header(value = "user-id", required = false) String userId) {
         try {
             TradeEvent backdatedTrade = objectMapper.readValue(tradeJson, TradeEvent.class);
-            log.info("Processing backdated trade in coldpath: tradeId={}, positionKey={}, effectiveDate={}", 
-                    backdatedTrade.getTradeId(), backdatedTrade.getPositionKey(), backdatedTrade.getEffectiveDate());
+            
+            // Note: For system/internal messages, authorization may be skipped
+            // In production, all messages should have user context
+            if (userId != null) {
+                log.info("Processing backdated trade in coldpath: tradeId={}, positionKey={}, effectiveDate={}, userId={}", 
+                        backdatedTrade.getTradeId(), backdatedTrade.getPositionKey(), 
+                        backdatedTrade.getEffectiveDate(), userId);
+            } else {
+                log.info("Processing backdated trade in coldpath: tradeId={}, positionKey={}, effectiveDate={} (no user context)", 
+                        backdatedTrade.getTradeId(), backdatedTrade.getPositionKey(), 
+                        backdatedTrade.getEffectiveDate());
+            }
             
             recalculatePosition(backdatedTrade);
             

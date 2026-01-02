@@ -17,7 +17,7 @@ import java.io.IOException;
  * Filter to extract and set correlation ID from HTTP headers
  */
 @Component
-@Order(1)
+@Order(2) // Run after AuthorizationFilter
 public class CorrelationIdFilter extends OncePerRequestFilter {
     
     private static final Logger log = LoggerFactory.getLogger(CorrelationIdFilter.class);

@@ -2,6 +2,10 @@ package com.bank.esps.api.controller;
 
 import com.bank.esps.application.service.EventStoreService;
 import com.bank.esps.application.service.ColdpathRecalculationService;
+import com.bank.esps.api.service.UserContextExtractor;
+import com.bank.esps.domain.auth.AuthorizationService;
+import com.bank.esps.domain.auth.PositionFunction;
+import com.bank.esps.domain.auth.UserContext;
 import com.bank.esps.domain.event.TradeEvent;
 import com.bank.esps.domain.messaging.MessageProducer;
 import com.bank.esps.infrastructure.persistence.entity.EventEntity;
@@ -9,6 +13,7 @@ import com.bank.esps.infrastructure.persistence.entity.SnapshotEntity;
 import com.bank.esps.infrastructure.persistence.repository.EventStoreRepository;
 import com.bank.esps.infrastructure.persistence.repository.SnapshotRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -35,6 +40,8 @@ public class EventStoreController {
     private final ColdpathRecalculationService coldpathRecalculationService;
     private final ObjectMapper objectMapper;
     private final MessageProducer messageProducer;
+    private final AuthorizationService authorizationService;
+    private final UserContextExtractor userContextExtractor;
     
     @org.springframework.beans.factory.annotation.Value("${app.kafka.topics.backdated-trades:backdated-trades}")
     private String backdatedTradesTopic;
@@ -44,13 +51,17 @@ public class EventStoreController {
                               EventStoreService eventStoreService,
                               ColdpathRecalculationService coldpathRecalculationService,
                               ObjectMapper objectMapper,
-                              MessageProducer messageProducer) {
+                              MessageProducer messageProducer,
+                              AuthorizationService authorizationService,
+                              UserContextExtractor userContextExtractor) {
         this.eventStoreRepository = eventStoreRepository;
         this.snapshotRepository = snapshotRepository;
         this.eventStoreService = eventStoreService;
         this.coldpathRecalculationService = coldpathRecalculationService;
         this.objectMapper = objectMapper;
         this.messageProducer = messageProducer;
+        this.authorizationService = authorizationService;
+        this.userContextExtractor = userContextExtractor;
     }
     
     @GetMapping("/events/count")
@@ -151,9 +162,17 @@ public class EventStoreController {
     }
     
     @PostMapping("/recalculate")
-    public ResponseEntity<Map<String, Object>> triggerRecalculation(@RequestBody TradeEvent tradeEvent) {
+    public ResponseEntity<Map<String, Object>> triggerRecalculation(@RequestBody TradeEvent tradeEvent,
+                                                                   HttpServletRequest request) {
         try {
-            log.info("Manual recalculation triggered for trade: {}", tradeEvent.getTradeId());
+            // Extract user context (set by AuthorizationFilter)
+            UserContext userContext = (UserContext) request.getAttribute("userContext");
+            if (userContext == null) {
+                userContext = userContextExtractor.extract(request);
+            }
+            
+            log.info("Manual recalculation triggered for trade: {}, userId: {}", 
+                    tradeEvent.getTradeId(), userContext != null ? userContext.getUserId() : "anonymous");
             
             // Validate required fields
             if (tradeEvent.getPositionKey() == null || tradeEvent.getPositionKey().trim().isEmpty()) {
@@ -170,6 +189,16 @@ public class EventStoreController {
                 response.put("status", "error");
                 response.put("message", "Position does not exist. Cannot recalculate a position with no events.");
                 return ResponseEntity.badRequest().body(response);
+            }
+            
+            // Check account access if applicable
+            if (userContext != null && tradeEvent.getAccount() != null) {
+                if (!authorizationService.hasAccountAccess(userContext.getUserId(), tradeEvent.getAccount())) {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("status", "error");
+                    response.put("message", "User does not have access to account: " + tradeEvent.getAccount());
+                    return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).body(response);
+                }
             }
             
             coldpathRecalculationService.recalculatePosition(tradeEvent);
@@ -211,9 +240,17 @@ public class EventStoreController {
      * This is a Plan B approach that avoids transaction rollback issues
      */
     @PostMapping("/recalculate/async")
-    public ResponseEntity<Map<String, Object>> triggerAsyncRecalculation(@RequestBody TradeEvent tradeEvent) {
+    public ResponseEntity<Map<String, Object>> triggerAsyncRecalculation(@RequestBody TradeEvent tradeEvent,
+                                                                         HttpServletRequest request) {
         try {
-            log.info("Async recalculation triggered for trade: {}", tradeEvent.getTradeId());
+            // Extract user context (set by AuthorizationFilter)
+            UserContext userContext = (UserContext) request.getAttribute("userContext");
+            if (userContext == null) {
+                userContext = userContextExtractor.extract(request);
+            }
+            
+            log.info("Async recalculation triggered for trade: {}, userId: {}", 
+                    tradeEvent.getTradeId(), userContext != null ? userContext.getUserId() : "anonymous");
             
             // Validate required fields
             if (tradeEvent.getPositionKey() == null || tradeEvent.getPositionKey().trim().isEmpty()) {
@@ -232,11 +269,21 @@ public class EventStoreController {
                 return ResponseEntity.badRequest().body(response);
             }
             
+            // Check account access if applicable
+            if (userContext != null && tradeEvent.getAccount() != null) {
+                if (!authorizationService.hasAccountAccess(userContext.getUserId(), tradeEvent.getAccount())) {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("status", "error");
+                    response.put("message", "User does not have access to account: " + tradeEvent.getAccount());
+                    return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).body(response);
+                }
+            }
+            
             // Serialize trade event to JSON
             String tradeJson = objectMapper.writeValueAsString(tradeEvent);
             
-            // Publish to backdated-trades topic (will be processed by KafkaListener)
-            messageProducer.send(backdatedTradesTopic, tradeEvent.getPositionKey(), tradeJson);
+            // Publish to backdated-trades topic with user context (will be processed by KafkaListener)
+            messageProducer.send(backdatedTradesTopic, tradeEvent.getPositionKey(), tradeJson, userContext);
             
             Map<String, Object> response = new HashMap<>();
             response.put("status", "accepted");

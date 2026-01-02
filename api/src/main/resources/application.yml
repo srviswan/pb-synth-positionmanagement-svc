@@ -95,6 +95,20 @@ app:
       regulatory-submissions: ${SOLACE_TOPIC_REGULATORY:regulatory-submissions}
   cache:
     provider: ${CACHE_PROVIDER:redis} # redis or memory
+  
+  # IAM Service Configuration
+  iam:
+    service:
+      url: ${IAM_SERVICE_URL:http://localhost:8081}
+    cache:
+      enabled: ${IAM_CACHE_ENABLED:true}
+      ttl:
+        minutes: ${IAM_CACHE_TTL_MINUTES:5}
+  
+  # Authorization Configuration
+  authorization:
+    enabled: ${AUTHORIZATION_ENABLED:true}
+    allow-anonymous: ${AUTHORIZATION_ALLOW_ANONYMOUS:false} # Set to true for development
 
 # Server Configuration
 server:

@@ -1,9 +1,14 @@
 package com.bank.esps.api.controller;
 
 import com.bank.esps.application.service.PositionService;
+import com.bank.esps.api.service.UserContextExtractor;
+import com.bank.esps.domain.auth.AuthorizationService;
+import com.bank.esps.domain.auth.PositionFunction;
+import com.bank.esps.domain.auth.UserContext;
 import com.bank.esps.domain.model.PositionState;
 import com.bank.esps.infrastructure.persistence.entity.SnapshotEntity;
 import com.bank.esps.infrastructure.persistence.repository.SnapshotRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -27,14 +32,37 @@ public class PositionController {
     
     private final PositionService positionService;
     private final SnapshotRepository snapshotRepository;
+    private final AuthorizationService authorizationService;
+    private final UserContextExtractor userContextExtractor;
     
-    public PositionController(PositionService positionService, SnapshotRepository snapshotRepository) {
+    public PositionController(PositionService positionService, 
+                             SnapshotRepository snapshotRepository,
+                             AuthorizationService authorizationService,
+                             UserContextExtractor userContextExtractor) {
         this.positionService = positionService;
         this.snapshotRepository = snapshotRepository;
+        this.authorizationService = authorizationService;
+        this.userContextExtractor = userContextExtractor;
     }
     
     @GetMapping("/{positionKey}")
-    public ResponseEntity<PositionState> getPosition(@PathVariable String positionKey) {
+    public ResponseEntity<PositionState> getPosition(@PathVariable String positionKey,
+                                                      HttpServletRequest request) {
+        // User context is checked in AuthorizationFilter
+        // Additional data access check here if needed
+        UserContext userContext = (UserContext) request.getAttribute("userContext");
+        if (userContext != null) {
+            PositionState position = positionService.getCurrentState(positionKey);
+            if (position != null) {
+                // Check account access if position has account
+                if (position.getAccount() != null && 
+                    !authorizationService.hasAccountAccess(userContext.getUserId(), position.getAccount())) {
+                    log.warn("User {} denied access to position {} (account: {})", 
+                        userContext.getUserId(), positionKey, position.getAccount());
+                    return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).build();
+                }
+            }
+        }
         try {
             PositionState position = positionService.getCurrentState(positionKey);
             if (position != null) {

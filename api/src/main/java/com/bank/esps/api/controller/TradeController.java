@@ -5,6 +5,10 @@ import com.bank.esps.application.service.DeadLetterQueueService;
 import com.bank.esps.application.service.MetricsService;
 import com.bank.esps.application.service.PositionService;
 import com.bank.esps.application.service.TradeValidationService;
+import com.bank.esps.api.service.UserContextExtractor;
+import com.bank.esps.domain.auth.AuthorizationService;
+import com.bank.esps.domain.auth.PositionFunction;
+import com.bank.esps.domain.auth.UserContext;
 import com.bank.esps.domain.event.TradeEvent;
 import com.bank.esps.domain.model.PositionState;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,23 +32,50 @@ public class TradeController {
     private final TradeValidationService validationService;
     private final DeadLetterQueueService dlqService;
     private final MetricsService metricsService;
+    private final AuthorizationService authorizationService;
+    private final UserContextExtractor userContextExtractor;
     
     public TradeController(PositionService positionService, 
                           CorrelationIdService correlationIdService,
                           TradeValidationService validationService,
                           DeadLetterQueueService dlqService,
-                          MetricsService metricsService) {
+                          MetricsService metricsService,
+                          AuthorizationService authorizationService,
+                          UserContextExtractor userContextExtractor) {
         this.positionService = positionService;
         this.correlationIdService = correlationIdService;
         this.validationService = validationService;
         this.dlqService = dlqService;
         this.metricsService = metricsService;
+        this.authorizationService = authorizationService;
+        this.userContextExtractor = userContextExtractor;
     }
     
     @PostMapping
     public ResponseEntity<PositionState> processTrade(@RequestBody TradeEvent tradeEvent,
                                                       HttpServletRequest request) {
         try {
+            // Extract user context (set by AuthorizationFilter)
+            UserContext userContext = (UserContext) request.getAttribute("userContext");
+            if (userContext == null) {
+                userContext = userContextExtractor.extract(request);
+            }
+            
+            // Check entitlement (also checked in filter, but double-check here for data access)
+            if (!authorizationService.hasEntitlement(userContext.getUserId(), 
+                    PositionFunction.TRADE_CREATE.getFunctionName())) {
+                log.warn("User {} denied access to create trade", userContext.getUserId());
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+            
+            // Check account access
+            if (tradeEvent.getAccount() != null && 
+                !authorizationService.hasAccountAccess(userContext.getUserId(), tradeEvent.getAccount())) {
+                log.warn("User {} denied access to account {}", 
+                    userContext.getUserId(), tradeEvent.getAccount());
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+            
             // Extract correlation ID from header if present
             String correlationId = request.getHeader("X-Correlation-ID");
             if (correlationId != null && !correlationId.isEmpty()) {
@@ -53,8 +84,9 @@ public class TradeController {
                 correlationIdService.generateCorrelationId();
             }
             
-            log.info("Processing trade: tradeId={}, correlationId={}", 
-                    tradeEvent.getTradeId(), correlationIdService.getCurrentCorrelationId());
+            log.info("Processing trade: tradeId={}, userId={}, correlationId={}", 
+                    tradeEvent.getTradeId(), userContext.getUserId(), 
+                    correlationIdService.getCurrentCorrelationId());
             
             // Early validation - before processing
             io.micrometer.core.instrument.Timer.Sample validationSample = metricsService.startValidation();

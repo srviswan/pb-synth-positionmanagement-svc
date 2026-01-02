@@ -1,5 +1,6 @@
 package com.bank.esps.infrastructure.messaging.solace;
 
+import com.bank.esps.domain.auth.UserContext;
 import com.bank.esps.domain.messaging.MessageProducer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -45,6 +46,11 @@ public class SolaceMessageProducer implements MessageProducer {
     
     @Override
     public void send(String topic, String key, Object message) {
+        send(topic, key, message, null);
+    }
+    
+    @Override
+    public void send(String topic, String key, Object message, UserContext userContext) {
         if (jmsTemplate == null) {
             log.error("Solace JMS Template not available. Cannot send message to topic: {}", topic);
             throw new UnsupportedOperationException("Solace messaging not configured. Set app.messaging.provider=solace and configure Solace connection.");
@@ -72,6 +78,19 @@ public class SolaceMessageProducer implements MessageProducer {
                     textMessage.setStringProperty("JMSCorrelationID", key);
                 }
                 
+                // Add user context to message properties
+                if (userContext != null) {
+                    textMessage.setStringProperty("user-id", userContext.getUserId());
+                    if (userContext.getRoles() != null && !userContext.getRoles().isEmpty()) {
+                        textMessage.setStringProperty("user-roles", 
+                            String.join(",", userContext.getRoles()));
+                    }
+                    if (userContext.getAccountIds() != null && !userContext.getAccountIds().isEmpty()) {
+                        textMessage.setStringProperty("user-accounts", 
+                            String.join(",", userContext.getAccountIds()));
+                    }
+                }
+                
                 // Set additional properties
                 textMessage.setStringProperty("contentType", "application/json");
                 textMessage.setStringProperty("topic", topic);
@@ -79,7 +98,8 @@ public class SolaceMessageProducer implements MessageProducer {
                 return textMessage;
             });
             
-            log.debug("Sent message to Solace topic/queue: {}, key: {}", topic, key);
+            log.debug("Sent message to Solace topic/queue: {}, key: {}, userId: {}", 
+                topic, key, userContext != null ? userContext.getUserId() : "anonymous");
             
         } catch (Exception e) {
             log.error("Failed to send message to Solace topic: {}", topic, e);
