@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -40,7 +40,7 @@ public class AuthorizationFilter extends OncePerRequestFilter {
     private boolean allowAnonymous;
     
     // Map of URL patterns to required functions
-    private static final Map<Pattern, PositionFunction> URL_FUNCTION_MAP = new HashMap<>();
+    private static final Map<Pattern, PositionFunction> URL_FUNCTION_MAP = new LinkedHashMap<>();
     
     static {
         // Trade endpoints
@@ -52,9 +52,17 @@ public class AuthorizationFilter extends OncePerRequestFilter {
         URL_FUNCTION_MAP.put(Pattern.compile("GET /api/positions/.*"), PositionFunction.POSITION_VIEW);
         URL_FUNCTION_MAP.put(Pattern.compile("PUT /api/positions/.*"), PositionFunction.POSITION_UPDATE);
         
+        URL_FUNCTION_MAP.put(Pattern.compile("POST /v1/contracts/.*/transactions"), PositionFunction.TRADE_CREATE);
+        URL_FUNCTION_MAP.put(Pattern.compile("POST /v1/contracts"), PositionFunction.TRADE_CREATE);
+        URL_FUNCTION_MAP.put(Pattern.compile("POST /v1/positions/.*/corporate-actions/dividends"), PositionFunction.POSITION_UPDATE);
+        URL_FUNCTION_MAP.put(Pattern.compile("POST /v1/positions/.*/settlements"), PositionFunction.POSITION_UPDATE);
+        URL_FUNCTION_MAP.put(Pattern.compile("GET /v1/positions"), PositionFunction.POSITION_VIEW);
+        URL_FUNCTION_MAP.put(Pattern.compile("GET /v1/positions/.*"), PositionFunction.POSITION_VIEW);
+        URL_FUNCTION_MAP.put(Pattern.compile("GET /v1/contracts"), PositionFunction.POSITION_VIEW);
+        URL_FUNCTION_MAP.put(Pattern.compile("GET /v1/contracts/.*"), PositionFunction.POSITION_VIEW);
+
         // Diagnostics endpoints
         URL_FUNCTION_MAP.put(Pattern.compile("/api/diagnostics"), PositionFunction.DIAGNOSTICS_VIEW);
-        URL_FUNCTION_MAP.put(Pattern.compile("/api/diagnostics/recalculate"), PositionFunction.DIAGNOSTICS_RECALCULATE);
         URL_FUNCTION_MAP.put(Pattern.compile("/api/diagnostics/recalculate/async"), PositionFunction.DIAGNOSTICS_RECALCULATE);
     }
     
@@ -170,6 +178,16 @@ public class AuthorizationFilter extends OncePerRequestFilter {
             if ("GET".equals(method)) {
                 return PositionFunction.POSITION_VIEW;
             } else if ("PUT".equals(method) || "PATCH".equals(method)) {
+                return PositionFunction.POSITION_UPDATE;
+            }
+        } else if (path.startsWith("/v1/contracts") || path.startsWith("/v1/positions")) {
+            if ("GET".equals(method)) {
+                return PositionFunction.POSITION_VIEW;
+            } else if ("POST".equals(method) && path.contains("/transactions")) {
+                return PositionFunction.TRADE_CREATE;
+            } else if ("POST".equals(method) && path.equals("/v1/contracts")) {
+                return PositionFunction.TRADE_CREATE;
+            } else if ("POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method)) {
                 return PositionFunction.POSITION_UPDATE;
             }
         } else if (path.startsWith("/api/diagnostics/recalculate")) {
