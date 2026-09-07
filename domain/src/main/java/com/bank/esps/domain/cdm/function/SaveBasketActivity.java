@@ -28,11 +28,13 @@ public final class SaveBasketActivity {
         if (contract == null || contract.getContractId() == null) {
             throw new IllegalArgumentException("FinancialContract is required");
         }
-        String underlierId = contract.getProduct() != null ? contract.getProduct().underlierId() : trade.getInstrumentId();
+        String securityId = trade.getInstrumentId() != null && !trade.getInstrumentId().isBlank()
+                ? trade.getInstrumentId()
+                : (contract.getProduct() != null ? contract.getProduct().underlierId() : null);
         PositionDirection implied = trade.impliedDirection();
-        BasketActivity current = repository.findOpenByContract(contract.getContractId(), underlierId, implied)
-                .or(() -> repository.findOpenByContract(contract.getContractId(), underlierId, implied.opposite()))
-                .or(() -> repository.findLatestByContract(contract.getContractId(), underlierId, implied))
+        BasketActivity current = repository.findOpenByContract(contract.getContractId(), securityId, implied)
+                .or(() -> repository.findOpenByContract(contract.getContractId(), securityId, implied.opposite()))
+                .or(() -> repository.findLatestByContract(contract.getContractId(), securityId, implied))
                 .orElse(null);
 
         List<BasketActivity> saved = new ArrayList<>();

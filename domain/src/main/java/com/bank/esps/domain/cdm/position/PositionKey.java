@@ -11,20 +11,29 @@ import java.util.Locale;
 import java.util.Objects;
 
 /**
- * Deterministic position identity. ESPS extension of CDM
- * {@code PositionIdentifier}: Hash(account|instrument|currency|direction).
+ * Deterministic position identity.
+ *
+ * <p>State-saving Position grain: Hash(contractId|securityId|direction).
+ * Account and book are attributes of the Position, not part of the key.
+ *
+ * <p>The four-argument factory remains for the event-sourced compatibility
+ * path: Hash(account|instrument|currency|direction).
  */
 @Getter
 @EqualsAndHashCode
 public final class PositionKey {
+    private final String contractId;
+    private final String securityId;
     private final String account;
     private final String instrument;
     private final String currency;
     private final PositionDirection direction;
     private final String value;
 
-    private PositionKey(String account, String instrument, String currency,
-                        PositionDirection direction, String value) {
+    private PositionKey(String contractId, String securityId, String account, String instrument,
+                        String currency, PositionDirection direction, String value) {
+        this.contractId = contractId;
+        this.securityId = securityId;
         this.account = account;
         this.instrument = instrument;
         this.currency = currency;
@@ -32,20 +41,38 @@ public final class PositionKey {
         this.value = value;
     }
 
+    /**
+     * Position grain used by {@code BasketActivity}: contract + security + long/short.
+     */
+    public static PositionKey of(String contractId, String securityId, PositionDirection direction) {
+        String normalizedContract = normalize(contractId);
+        String normalizedSecurity = normalize(securityId);
+        PositionDirection dir = direction != null ? direction : PositionDirection.LONG;
+        String input = String.join("|", normalizedContract, normalizedSecurity, dir.name());
+        return new PositionKey(normalizedContract, normalizedSecurity, null, normalizedSecurity, null, dir, hash(input));
+    }
+
+    /**
+     * Event-store compatibility key: account + instrument + currency + direction.
+     */
     public static PositionKey of(String account, String instrument, String currency, PositionDirection direction) {
         String normalizedAccount = normalize(account);
         String normalizedInstrument = normalize(instrument);
         String normalizedCurrency = normalize(currency);
         PositionDirection dir = direction != null ? direction : PositionDirection.LONG;
         String input = String.join("|", normalizedAccount, normalizedInstrument, normalizedCurrency, dir.name());
-        return new PositionKey(normalizedAccount, normalizedInstrument, normalizedCurrency, dir, hash(input));
+        return new PositionKey(null, normalizedInstrument, normalizedAccount, normalizedInstrument,
+                normalizedCurrency, dir, hash(input));
     }
 
     public PositionKey opposite() {
+        if (contractId != null && !contractId.isBlank()) {
+            return of(contractId, securityId, direction.opposite());
+        }
         return of(account, instrument, currency, direction.opposite());
     }
 
-    private static String normalize(String value) {
+    public static String normalize(String value) {
         return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
     }
 

@@ -2,10 +2,14 @@ package com.bank.esps.domain.cdm.repository;
 
 import com.bank.esps.domain.cdm.base.PositionDirection;
 import com.bank.esps.domain.cdm.basket.BasketActivity;
+import com.bank.esps.domain.cdm.position.PositionKey;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 
 /**
  * In-process state store used by domain tests and local runs.
@@ -20,26 +24,39 @@ public class InMemoryBasketActivityRepository implements BasketActivityRepositor
     }
 
     @Override
-    public Optional<BasketActivity> findOpenByContract(String contractId, String underlierId,
+    public Optional<BasketActivity> findByPositionKey(String positionKey) {
+        return byId.values().stream()
+                .filter(activity -> positionKey != null && positionKey.equals(activity.getPositionKey()))
+                .max(Comparator.comparingInt(BasketActivity::getVersion));
+    }
+
+    @Override
+    public Optional<BasketActivity> findOpenByContract(String contractId, String securityId,
                                                        PositionDirection direction) {
-        return matching(contractId, underlierId, direction)
+        return matching(contractId, securityId, direction)
                 .filter(activity -> !activity.isClosed())
                 .findFirst();
     }
 
     @Override
-    public Optional<BasketActivity> findLatestByContract(String contractId, String underlierId,
+    public Optional<BasketActivity> findLatestByContract(String contractId, String securityId,
                                                          PositionDirection direction) {
-        return matching(contractId, underlierId, direction)
-                .max(java.util.Comparator.comparingInt(BasketActivity::getVersion));
+        return matching(contractId, securityId, direction)
+                .max(Comparator.comparingInt(BasketActivity::getVersion));
     }
 
-    private java.util.stream.Stream<BasketActivity> matching(String contractId, String underlierId,
-                                                             PositionDirection direction) {
+    @Override
+    public List<BasketActivity> findByContractId(String contractId) {
         return byId.values().stream()
-                .filter(activity -> contractId.equals(activity.getContractId()))
-                .filter(activity -> underlierId == null
-                        || underlierId.equals(activity.getProduct() != null ? activity.getProduct().underlierId() : null))
+                .filter(activity -> contractId != null && contractId.equals(activity.getContractId()))
+                .toList();
+    }
+
+    private Stream<BasketActivity> matching(String contractId, String securityId, PositionDirection direction) {
+        String normalizedSecurity = PositionKey.normalize(securityId);
+        return byId.values().stream()
+                .filter(activity -> contractId != null && contractId.equals(activity.getContractId()))
+                .filter(activity -> normalizedSecurity.equals(PositionKey.normalize(activity.resolvedSecurityId())))
                 .filter(activity -> direction == activity.getDirection());
     }
 

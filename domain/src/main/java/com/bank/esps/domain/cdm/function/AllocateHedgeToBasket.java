@@ -37,7 +37,7 @@ public final class AllocateHedgeToBasket {
             throw new IllegalArgumentException("Hedge quantity must be non-zero");
         }
         if (activity == null) {
-            activity = BasketActivity.open(contract, trade.impliedDirection());
+            activity = BasketActivity.open(contract, securityIdOf(contract, trade), trade.impliedDirection());
         }
         if (activity.getUpi() == null) {
             activity.setUpi(trade.getTradeId());
@@ -123,8 +123,15 @@ public final class AllocateHedgeToBasket {
         return remaining;
     }
 
+    private static String securityIdOf(FinancialContract contract, PositionTrade trade) {
+        if (trade.getInstrumentId() != null && !trade.getInstrumentId().isBlank()) {
+            return trade.getInstrumentId();
+        }
+        return contract.getProduct() != null ? contract.getProduct().underlierId() : null;
+    }
+
     private static BasketActivityDetail detailFrom(BasketActivity activity, PositionTrade trade) {
-        Underlier underlier = activity.getProduct() != null ? activity.getProduct().getUnderlier() : null;
+        Underlier underlier = underlierFor(activity, trade);
         LocalDate settlement = trade.getSettlementDate() != null ? trade.getSettlementDate() : trade.getTradeDate();
         return BasketActivityDetail.builder()
                 .detailId(UUID.randomUUID().toString())
@@ -139,6 +146,17 @@ public final class AllocateHedgeToBasket {
                 .allocationStatus("ALLOCATED")
                 .recordedAt(OffsetDateTime.now())
                 .build();
+    }
+
+    private static Underlier underlierFor(BasketActivity activity, PositionTrade trade) {
+        Underlier productUnderlier = activity.getProduct() != null ? activity.getProduct().getUnderlier() : null;
+        if (trade.getInstrumentId() == null || trade.getInstrumentId().isBlank()) {
+            return productUnderlier;
+        }
+        if (productUnderlier != null && trade.getInstrumentId().equalsIgnoreCase(productUnderlier.getIdentifier())) {
+            return productUnderlier;
+        }
+        return Underlier.equity(trade.getInstrumentId(), trade.getCurrency());
     }
 
     private static BasketSettlement settlementFrom(BasketActivityDetail detail) {

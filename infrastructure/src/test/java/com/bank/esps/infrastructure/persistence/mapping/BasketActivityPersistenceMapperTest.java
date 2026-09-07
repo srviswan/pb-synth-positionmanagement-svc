@@ -54,7 +54,9 @@ class BasketActivityPersistenceMapperTest {
 
         assertThat(header.getProductType()).isEqualTo(ProductType.CFD.name());
         assertThat(header.getUnderlierId()).isEqualTo("AAPL");
+        assertThat(header.getSecurityId()).isEqualTo("AAPL");
         assertThat(restored.getProduct().getProductType()).isEqualTo(ProductType.CFD);
+        assertThat(restored.getSecurityId()).isEqualTo("AAPL");
         assertThat(restored.getDetails()).hasSize(1);
         assertThat(restored.getOpenLots()).hasSize(1);
         assertThat(restored.getSettlements()).hasSize(1);

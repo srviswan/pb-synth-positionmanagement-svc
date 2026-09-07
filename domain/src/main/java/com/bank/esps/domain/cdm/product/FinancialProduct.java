@@ -59,6 +59,19 @@ public class FinancialProduct {
                 .build();
     }
 
+    public static FinancialProduct cibSwap(String identifier, String currency) {
+        Underlier underlier = Underlier.cib(identifier, currency);
+        return FinancialProduct.builder()
+                .productType(ProductType.SWAP)
+                .productQualifier("EquitySwap")
+                .currency(currency)
+                .underlier(underlier)
+                .payouts(new ArrayList<>(List.of(
+                        PayoutLeg.performance(underlier, currency),
+                        PayoutLeg.funding("SOFR", "1D", currency))))
+                .build();
+    }
+
     public static FinancialProduct basketSwap(String basketId, String currency, List<BasketComponent> constituents) {
         Underlier underlier = Underlier.basket(basketId, currency, constituents);
         return FinancialProduct.builder()

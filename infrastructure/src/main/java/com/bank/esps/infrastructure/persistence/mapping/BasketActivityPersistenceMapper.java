@@ -7,6 +7,8 @@ import com.bank.esps.domain.cdm.basket.BasketActivity;
 import com.bank.esps.domain.cdm.basket.BasketActivityDetail;
 import com.bank.esps.domain.cdm.basket.BasketSettlement;
 import com.bank.esps.domain.cdm.basket.ClosingLot;
+import com.bank.esps.domain.cdm.basket.DividendClosingLot;
+import com.bank.esps.domain.cdm.basket.DividendOpenLot;
 import com.bank.esps.domain.cdm.basket.OpenLot;
 import com.bank.esps.domain.cdm.position.ClosedState;
 import com.bank.esps.domain.cdm.position.ClosedStateReason;
@@ -19,6 +21,8 @@ import com.bank.esps.domain.enums.TaxLotMethod;
 import com.bank.esps.infrastructure.persistence.entity.BasketActivityDetailEntity;
 import com.bank.esps.infrastructure.persistence.entity.BasketActivityEntity;
 import com.bank.esps.infrastructure.persistence.entity.BasketClosingLotEntity;
+import com.bank.esps.infrastructure.persistence.entity.BasketDivClosingLotEntity;
+import com.bank.esps.infrastructure.persistence.entity.BasketDivOpenLotEntity;
 import com.bank.esps.infrastructure.persistence.entity.BasketOpenLotEntity;
 import com.bank.esps.infrastructure.persistence.entity.BasketSettlementEntity;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -43,6 +47,7 @@ public class BasketActivityPersistenceMapper {
         return BasketActivityEntity.builder()
                 .activityId(activity.getActivityId())
                 .contractId(activity.getContractId())
+                .securityId(activity.resolvedSecurityId())
                 .positionKey(activity.getPositionKey())
                 .upi(activity.getUpi())
                 .account(activity.getAccount() != null ? activity.getAccount().getAccountId() : null)
@@ -68,14 +73,26 @@ public class BasketActivityPersistenceMapper {
                                    List<BasketOpenLotEntity> openLots,
                                    List<BasketClosingLotEntity> closingLots,
                                    List<BasketSettlementEntity> settlements) {
+        return toDomain(entity, details, openLots, closingLots, settlements, List.of(), List.of());
+    }
+
+    public BasketActivity toDomain(BasketActivityEntity entity,
+                                   List<BasketActivityDetailEntity> details,
+                                   List<BasketOpenLotEntity> openLots,
+                                   List<BasketClosingLotEntity> closingLots,
+                                   List<BasketSettlementEntity> settlements,
+                                   List<BasketDivOpenLotEntity> dividendOpenLots,
+                                   List<BasketDivClosingLotEntity> dividendClosingLots) {
         FinancialProduct product = readProduct(entity.getProductJson());
         PositionStatus status = PositionStatus.valueOf(entity.getPositionStatus());
         LifecycleState lifecycle = status == PositionStatus.CLOSED
                 ? LifecycleState.closed(ClosedState.builder().reason(ClosedStateReason.TERMINATED).build())
                 : LifecycleState.builder().positionStatus(status).build();
+        String securityId = entity.getSecurityId() != null ? entity.getSecurityId() : entity.getUnderlierId();
         return BasketActivity.builder()
                 .activityId(entity.getActivityId())
                 .contractId(entity.getContractId())
+                .securityId(securityId)
                 .product(product)
                 .account(entity.getAccount() == null ? null : Account.of(entity.getAccount()))
                 .book(entity.getBook() == null ? null : Book.of(entity.getBook()))
@@ -91,6 +108,8 @@ public class BasketActivityPersistenceMapper {
                 .openLots(openLots.stream().map(this::toOpenLot).collect(java.util.stream.Collectors.toCollection(ArrayList::new)))
                 .closingLots(closingLots.stream().map(this::toClosingLot).collect(java.util.stream.Collectors.toCollection(ArrayList::new)))
                 .settlements(settlements.stream().map(this::toSettlement).collect(java.util.stream.Collectors.toCollection(ArrayList::new)))
+                .dividendOpenLots(dividendOpenLots.stream().map(this::toDividendOpenLot).collect(java.util.stream.Collectors.toCollection(ArrayList::new)))
+                .dividendClosingLots(dividendClosingLots.stream().map(this::toDividendClosingLot).collect(java.util.stream.Collectors.toCollection(ArrayList::new)))
                 .build();
     }
 
@@ -157,6 +176,35 @@ public class BasketActivityPersistenceMapper {
                 .build();
     }
 
+    public BasketDivOpenLotEntity toDividendOpenLotEntity(String activityId, DividendOpenLot lot) {
+        return BasketDivOpenLotEntity.builder()
+                .lotId(lot.getLotId())
+                .activityId(activityId)
+                .sourceOpenLotId(lot.getSourceOpenLotId())
+                .dividendId(lot.getDividendId())
+                .exDate(lot.getExDate())
+                .payDate(lot.getPayDate())
+                .quantity(lot.getQuantity())
+                .remainingQty(lot.getRemainingQuantity())
+                .rate(lot.getRate())
+                .amount(lot.getAmount())
+                .currency(lot.getCurrency())
+                .build();
+    }
+
+    public BasketDivClosingLotEntity toDividendClosingLotEntity(String activityId, DividendClosingLot lot) {
+        return BasketDivClosingLotEntity.builder()
+                .closingLotId(lot.getClosingLotId())
+                .activityId(activityId)
+                .openedDividendLotId(lot.getOpenedDividendLotId())
+                .dividendId(lot.getDividendId())
+                .closedQty(lot.getClosedQuantity())
+                .amount(lot.getAmount())
+                .payDate(lot.getPayDate())
+                .currency(lot.getCurrency())
+                .build();
+    }
+
     private BasketActivityDetail toDetail(BasketActivityDetailEntity entity) {
         return BasketActivityDetail.builder()
                 .detailId(entity.getDetailId())
@@ -213,6 +261,33 @@ public class BasketActivityPersistenceMapper {
                 .settledQuantity(entity.getSettledQty())
                 .currency(entity.getCurrency())
                 .status(entity.getStatus())
+                .build();
+    }
+
+    private DividendOpenLot toDividendOpenLot(BasketDivOpenLotEntity entity) {
+        return DividendOpenLot.builder()
+                .lotId(entity.getLotId())
+                .sourceOpenLotId(entity.getSourceOpenLotId())
+                .dividendId(entity.getDividendId())
+                .exDate(entity.getExDate())
+                .payDate(entity.getPayDate())
+                .quantity(entity.getQuantity())
+                .remainingQuantity(entity.getRemainingQty())
+                .rate(entity.getRate())
+                .amount(entity.getAmount())
+                .currency(entity.getCurrency())
+                .build();
+    }
+
+    private DividendClosingLot toDividendClosingLot(BasketDivClosingLotEntity entity) {
+        return DividendClosingLot.builder()
+                .closingLotId(entity.getClosingLotId())
+                .openedDividendLotId(entity.getOpenedDividendLotId())
+                .dividendId(entity.getDividendId())
+                .closedQuantity(entity.getClosedQty())
+                .amount(entity.getAmount())
+                .payDate(entity.getPayDate())
+                .currency(entity.getCurrency())
                 .build();
     }
 

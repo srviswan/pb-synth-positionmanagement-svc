@@ -16,7 +16,17 @@
  *       {@link com.bank.esps.domain.cdm.basket.ClosingLot}</li>
  *   <li>{@code DOBasketSettlementTable} →
  *       {@link com.bank.esps.domain.cdm.basket.BasketSettlement}</li>
+ *   <li>{@code DOBasketActDivOpenLotTable} →
+ *       {@link com.bank.esps.domain.cdm.basket.DividendOpenLot}</li>
+ *   <li>{@code DOBasketActDivClosingTable} →
+ *       {@link com.bank.esps.domain.cdm.basket.DividendClosingLot}</li>
  * </ul>
+ *
+ * <p>Position identity is {@code contractId + securityId + direction}. Account
+ * and book are attributes. Portfolio swaps are one contract with N Position
+ * rows (one per constituent security + long/short). CIB is underlier
+ * metadata ({@code identifierScheme} + {@code instrumentClass}), not a
+ * product type.
  *
  * <p>Products are extensible: {@link com.bank.esps.domain.cdm.product.FinancialProduct}
  * is a CDM {@code NonTransferableProduct} with composable payouts and an

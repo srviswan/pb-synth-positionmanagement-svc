@@ -1,0 +1,766 @@
+openapi: 3.0.3
+info:
+  title: Position Management API
+  version: 1.0.0
+  description: |
+    API-first contract for the firm's Position grain (Contract + Security + Long/Short).
+    CDM-shaped internals; public resources use firm language (Contract, Position,
+    Transaction, OpenLot, ClosingLot, Settlement, Dividend lots).
+    Existing `/api/trades` and `/api/positions` remain as a compatibility facade.
+servers:
+  - url: /
+    description: Local service
+tags:
+  - name: Contracts
+  - name: Positions
+  - name: Transactions
+  - name: Lots
+  - name: Settlements
+  - name: Dividends
+paths:
+  /v1/contracts:
+    post:
+      tags: [Contracts]
+      summary: Create or upsert a legal swap/CFD contract and product
+      operationId: upsertContract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContractRequest'
+      responses:
+        '200':
+          description: Existing contract replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '201':
+          description: Contract created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '400':
+          description: Invalid contract
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/contracts/{contractId}:
+    get:
+      tags: [Contracts]
+      summary: Get contract and product
+      operationId: getContract
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+      responses:
+        '200':
+          description: Contract
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/contracts/{contractId}/positions:
+    get:
+      tags: [Positions]
+      summary: Portfolio view — all Position rows for the contract (one per security + LS)
+      operationId: listContractPositions
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Positions under the contract
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PositionList'
+        '404':
+          description: Contract not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/contracts/{contractId}/transactions:
+    post:
+      tags: [Transactions]
+      summary: Allocate a hedge buy/sell onto the contract (creates/updates Position for security + LS)
+      operationId: allocateTransaction
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionRequest'
+      responses:
+        '200':
+          description: Existing position updated (idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PositionList'
+        '201':
+          description: Hedge allocated; Position state saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PositionList'
+        '400':
+          description: Invalid transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Contract not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/positions:
+    get:
+      tags: [Positions]
+      summary: Lookup Position by natural key (contractId + securityId + direction)
+      operationId: findPosition
+      parameters:
+        - name: contractId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: securityId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: direction
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/PositionDirection'
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Position
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Position'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/positions/{positionId}:
+    get:
+      tags: [Positions]
+      summary: Get one Position (optional children via include)
+      operationId: getPosition
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Position
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Position'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/positions/{positionId}/transactions:
+    get:
+      tags: [Transactions]
+      summary: Hedge trades allocated to the Position
+      operationId: listTransactions
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+      responses:
+        '200':
+          description: Transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transaction'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/positions/{positionId}/open-lots:
+    get:
+      tags: [Lots]
+      summary: Open tax lots
+      operationId: listOpenLots
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+      responses:
+        '200':
+          description: Open lots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OpenLot'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/positions/{positionId}/closing-lots:
+    get:
+      tags: [Lots]
+      summary: Closing lots and realized PnL
+      operationId: listClosingLots
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+      responses:
+        '200':
+          description: Closing lots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClosingLot'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/positions/{positionId}/settlements:
+    get:
+      tags: [Settlements]
+      summary: Settled trades
+      operationId: listSettlements
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+      responses:
+        '200':
+          description: Settlements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Settlement'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Settlements]
+      summary: Record or update settlement status/quantity
+      operationId: applySettlement
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettlementRequest'
+      responses:
+        '200':
+          description: Position with settlements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Position'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/positions/{positionId}/dividend-open-lots:
+    get:
+      tags: [Dividends]
+      summary: Dividend open lots
+      operationId: listDividendOpenLots
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+      responses:
+        '200':
+          description: Dividend open lots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DividendOpenLot'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/positions/{positionId}/dividend-closing-lots:
+    get:
+      tags: [Dividends]
+      summary: Dividend closing lots
+      operationId: listDividendClosingLots
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+      responses:
+        '200':
+          description: Dividend closing lots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DividendClosingLot'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/positions/{positionId}/corporate-actions/dividends:
+    post:
+      tags: [Dividends]
+      summary: Apply a dividend corporate action (open or close dividend lots)
+      operationId: applyDividend
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DividendRequest'
+      responses:
+        '200':
+          description: Position with dividend lots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Position'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  parameters:
+    ContractId:
+      name: contractId
+      in: path
+      required: true
+      schema:
+        type: string
+    PositionId:
+      name: positionId
+      in: path
+      required: true
+      schema:
+        type: string
+        description: Basket activity id (Position id)
+    Include:
+      name: include
+      in: query
+      required: false
+      schema:
+        type: string
+        example: transactions,lots,settlements,dividends
+      description: Comma-separated children to embed. Omitted on GET-by-id includes all children.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    PositionDirection:
+      type: string
+      enum: [LONG, SHORT]
+    ProductType:
+      type: string
+      enum: [SWAP, CFD, FORWARD, OPTION]
+    UnderlierType:
+      type: string
+      enum: [EQUITY, INDEX, FX, INTEREST_RATE, COMMODITY, CREDIT, BASKET]
+    DividendAction:
+      type: string
+      enum: [OPEN, CLOSE]
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+    BasketComponent:
+      type: object
+      properties:
+        identifier:
+          type: string
+        type:
+          $ref: '#/components/schemas/UnderlierType'
+        weight:
+          type: number
+        currency:
+          type: string
+    Underlier:
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/UnderlierType'
+        identifier:
+          type: string
+        identifierScheme:
+          type: string
+        instrumentClass:
+          type: string
+          description: Firm instrument class (e.g. CIB). Not a product type.
+        description:
+          type: string
+        currency:
+          type: string
+        exchange:
+          type: string
+        constituents:
+          type: array
+          items:
+            $ref: '#/components/schemas/BasketComponent'
+    Product:
+      type: object
+      properties:
+        productType:
+          $ref: '#/components/schemas/ProductType'
+        productQualifier:
+          type: string
+        currency:
+          type: string
+        underlier:
+          $ref: '#/components/schemas/Underlier'
+    ContractRequest:
+      type: object
+      required: [contractId, productType, currency, underlier]
+      properties:
+        contractId:
+          type: string
+        productType:
+          $ref: '#/components/schemas/ProductType'
+        productQualifier:
+          type: string
+        currency:
+          type: string
+        accountId:
+          type: string
+        bookId:
+          type: string
+        party1Id:
+          type: string
+        party2Id:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        taxLotMethod:
+          type: string
+          enum: [FIFO, LIFO, HIFO]
+        underlier:
+          $ref: '#/components/schemas/Underlier'
+    Contract:
+      allOf:
+        - $ref: '#/components/schemas/ContractRequest'
+        - type: object
+          properties:
+            product:
+              $ref: '#/components/schemas/Product'
+    TransactionRequest:
+      type: object
+      required: [tradeId, securityId, quantity, price, tradeDate]
+      properties:
+        tradeId:
+          type: string
+        securityId:
+          type: string
+          description: Constituent security. Product type lives on the Contract, not the trade.
+        quantity:
+          type: number
+          description: Signed quantity (buy positive / sell negative)
+        price:
+          type: number
+        currency:
+          type: string
+        tradeDate:
+          type: string
+          format: date
+        settlementDate:
+          type: string
+          format: date
+        effectiveDate:
+          type: string
+          format: date
+        accountId:
+          type: string
+        bookId:
+          type: string
+        taxLotMethod:
+          type: string
+          enum: [FIFO, LIFO, HIFO]
+    Transaction:
+      type: object
+      properties:
+        detailId:
+          type: string
+        tradeId:
+          type: string
+        securityId:
+          type: string
+        quantity:
+          type: number
+        price:
+          type: number
+        currency:
+          type: string
+        tradeDate:
+          type: string
+          format: date
+        effectiveDate:
+          type: string
+          format: date
+        settlementDate:
+          type: string
+          format: date
+        allocationStatus:
+          type: string
+    OpenLot:
+      type: object
+      properties:
+        lotId:
+          type: string
+        sourceDetailId:
+          type: string
+        sourceTradeId:
+          type: string
+        originalQuantity:
+          type: number
+        remainingQuantity:
+          type: number
+        costBasis:
+          type: number
+        tradeDate:
+          type: string
+          format: date
+        settlementDate:
+          type: string
+          format: date
+    ClosingLot:
+      type: object
+      properties:
+        closingLotId:
+          type: string
+        openedLotId:
+          type: string
+        closingDetailId:
+          type: string
+        closingTradeId:
+          type: string
+        closedQuantity:
+          type: number
+        closePrice:
+          type: number
+        costBasis:
+          type: number
+        realizedPnL:
+          type: number
+        tradeDate:
+          type: string
+          format: date
+        settlementDate:
+          type: string
+          format: date
+    Settlement:
+      type: object
+      properties:
+        settlementId:
+          type: string
+        detailId:
+          type: string
+        tradeId:
+          type: string
+        settlementDate:
+          type: string
+          format: date
+        settledQuantity:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+    SettlementRequest:
+      type: object
+      properties:
+        detailId:
+          type: string
+        tradeId:
+          type: string
+        settlementDate:
+          type: string
+          format: date
+        settledQuantity:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          default: SETTLED
+    DividendRequest:
+      type: object
+      required: [dividendId, action]
+      properties:
+        dividendId:
+          type: string
+        exDate:
+          type: string
+          format: date
+        payDate:
+          type: string
+          format: date
+        rate:
+          type: number
+        amount:
+          type: number
+        currency:
+          type: string
+        action:
+          $ref: '#/components/schemas/DividendAction'
+    DividendOpenLot:
+      type: object
+      properties:
+        lotId:
+          type: string
+        sourceOpenLotId:
+          type: string
+        dividendId:
+          type: string
+        exDate:
+          type: string
+          format: date
+        payDate:
+          type: string
+          format: date
+        quantity:
+          type: number
+        remainingQuantity:
+          type: number
+        rate:
+          type: number
+        amount:
+          type: number
+        currency:
+          type: string
+    DividendClosingLot:
+      type: object
+      properties:
+        closingLotId:
+          type: string
+        openedDividendLotId:
+          type: string
+        dividendId:
+          type: string
+        closedQuantity:
+          type: number
+        amount:
+          type: number
+        payDate:
+          type: string
+          format: date
+        currency:
+          type: string
+    Position:
+      type: object
+      properties:
+        positionId:
+          type: string
+        contractId:
+          type: string
+        securityId:
+          type: string
+        direction:
+          $ref: '#/components/schemas/PositionDirection'
+        positionKey:
+          type: string
+        accountId:
+          type: string
+        bookId:
+          type: string
+        upi:
+          type: string
+        status:
+          type: string
+        version:
+          type: integer
+        quantity:
+          type: number
+        realizedPnL:
+          type: number
+        currency:
+          type: string
+        product:
+          $ref: '#/components/schemas/Product'
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        openLots:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenLot'
+        closingLots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClosingLot'
+        settlements:
+          type: array
+          items:
+            $ref: '#/components/schemas/Settlement'
+        dividendOpenLots:
+          type: array
+          items:
+            $ref: '#/components/schemas/DividendOpenLot'
+        dividendClosingLots:
+          type: array
+          items:
+            $ref: '#/components/schemas/DividendClosingLot'
+    PositionList:
+      type: object
+      properties:
+        contractId:
+          type: string
+        positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Position'

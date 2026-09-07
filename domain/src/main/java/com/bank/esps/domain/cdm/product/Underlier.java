@@ -29,6 +29,7 @@ public class Underlier {
     private String referenceRate;
     private String tenor;
     private String creditName;
+    private String instrumentClass;
     @Builder.Default
     private List<BasketComponent> constituents = new ArrayList<>();
 
@@ -84,6 +85,16 @@ public class Underlier {
                 .type(UnderlierType.CREDIT)
                 .identifier(creditName)
                 .creditName(creditName)
+                .currency(currency)
+                .build();
+    }
+
+    public static Underlier cib(String identifier, String currency) {
+        return Underlier.builder()
+                .type(UnderlierType.EQUITY)
+                .identifier(identifier)
+                .identifierScheme("CIB")
+                .instrumentClass("CIB")
                 .currency(currency)
                 .build();
     }
