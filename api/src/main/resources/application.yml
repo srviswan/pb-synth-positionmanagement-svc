@@ -109,6 +109,8 @@ app:
   authorization:
     enabled: ${AUTHORIZATION_ENABLED:true}
     allow-anonymous: ${AUTHORIZATION_ALLOW_ANONYMOUS:false} # Set to true for development
+    entitlements:
+      file: ${ENTITLEMENTS_FILE:entitlements.yml} # Path to entitlements YAML file (in classpath)
 
 # Server Configuration
 server:

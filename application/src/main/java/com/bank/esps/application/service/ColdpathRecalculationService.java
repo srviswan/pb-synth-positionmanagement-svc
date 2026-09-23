@@ -7,6 +7,7 @@ import com.bank.esps.domain.messaging.MessageProducer;
 import com.bank.esps.domain.model.LotAllocationResult;
 import com.bank.esps.domain.model.PositionState;
 import com.bank.esps.infrastructure.persistence.entity.EventEntity;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,32 +58,42 @@ public class ColdpathRecalculationService {
     }
     
     /**
-     * Kafka listener for backdated trades with authorization check
+     * Kafka listener for backdated trades with partition awareness
      */
     @KafkaListener(topics = "${app.kafka.topics.backdated-trades:backdated-trades}", 
                    groupId = "${spring.kafka.consumer.group-id:position-management-coldpath}")
     @Transactional
-    public void processBackdatedTrade(String tradeJson,
-                                     @org.springframework.messaging.handler.annotation.Header(value = "user-id", required = false) String userId) {
+    public void processBackdatedTrade(
+            ConsumerRecord<String, String> record,
+            @org.springframework.messaging.handler.annotation.Header(value = "user-id", required = false) String userId) {
         try {
+            String tradeJson = record.value();
             TradeEvent backdatedTrade = objectMapper.readValue(tradeJson, TradeEvent.class);
+            
+            // Extract partition information
+            int partition = record.partition();
+            String partitionKey = record.key(); // positionKey
+            long offset = record.offset();
             
             // Note: For system/internal messages, authorization may be skipped
             // In production, all messages should have user context
             if (userId != null) {
-                log.info("Processing backdated trade in coldpath: tradeId={}, positionKey={}, effectiveDate={}, userId={}", 
+                log.info("Processing backdated trade in coldpath: tradeId={}, positionKey={}, effectiveDate={}, userId={}, partition={}, offset={}", 
                         backdatedTrade.getTradeId(), backdatedTrade.getPositionKey(), 
-                        backdatedTrade.getEffectiveDate(), userId);
+                        backdatedTrade.getEffectiveDate(), userId, partition, offset);
             } else {
-                log.info("Processing backdated trade in coldpath: tradeId={}, positionKey={}, effectiveDate={} (no user context)", 
+                log.info("Processing backdated trade in coldpath: tradeId={}, positionKey={}, effectiveDate={}, partition={}, offset={} (no user context)", 
                         backdatedTrade.getTradeId(), backdatedTrade.getPositionKey(), 
-                        backdatedTrade.getEffectiveDate());
+                        backdatedTrade.getEffectiveDate(), partition, offset);
             }
+            
+            // Track partition metrics if needed
+            // metricsService.recordPartitionProcessing(partition);
             
             recalculatePosition(backdatedTrade);
             
         } catch (Exception e) {
-            log.error("Failed to process backdated trade: {}", tradeJson, e);
+            log.error("Failed to process backdated trade from partition: {}", record.partition(), e);
             throw new RuntimeException("Failed to process backdated trade", e);
         }
     }

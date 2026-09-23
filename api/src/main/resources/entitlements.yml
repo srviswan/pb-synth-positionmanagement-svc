@@ -1,0 +1,87 @@
+# Entitlements Configuration
+# Defines function-level entitlements for Position Management Service
+# Format: functionName: description
+
+entitlements:
+  # Position Viewing
+  position:view: "View positions"
+  position:search: "Search positions"
+  position:export: "Export position data"
+  
+  # Position Management
+  position:update: "Update positions"
+  position:adjust: "Adjust positions"
+  
+  # Trade Operations
+  trade:create: "Create new trades"
+  trade:view: "View trades"
+  trade:increase: "Increase trade quantity"
+  trade:decrease: "Decrease trade quantity"
+  trade:terminate: "Terminate trades"
+  
+  # Diagnostics and Administration
+  diagnostics:view: "View diagnostics"
+  diagnostics:recalculate: "Trigger recalculation"
+  diagnostics:admin: "Diagnostics administration"
+  
+  # Position Administration
+  position:admin: "Position administration"
+
+# URL to Function Mapping
+# Maps HTTP method + URL pattern to required function
+urlMappings:
+  - method: "POST"
+    pattern: "/api/trades"
+    function: "trade:create"
+  
+  - method: "GET"
+    pattern: "/api/trades/.*"
+    function: "trade:view"
+  
+  - method: "GET"
+    pattern: "/api/positions"
+    function: "position:view"
+  
+  - method: "GET"
+    pattern: "/api/positions/.*"
+    function: "position:view"
+  
+  - method: "PUT"
+    pattern: "/api/positions/.*"
+    function: "position:update"
+  
+  - method: "GET"
+    pattern: "/api/diagnostics"
+    function: "diagnostics:view"
+  
+  - method: "POST"
+    pattern: "/api/diagnostics/recalculate"
+    function: "diagnostics:recalculate"
+  
+  - method: "POST"
+    pattern: "/api/diagnostics/recalculate/async"
+    function: "diagnostics:recalculate"
+
+  - method: "POST"
+    pattern: "/api/state/positions/.*/activities"
+    function: "trade:create"
+
+  - method: "GET"
+    pattern: "/api/state/positions/.*/trades"
+    function: "trade:view"
+
+  - method: "GET"
+    pattern: "/api/state/trades/.*"
+    function: "trade:view"
+
+  - method: "GET"
+    pattern: "/api/state/positions/.*"
+    function: "position:view"
+
+  - method: "POST"
+    pattern: "/api/state/regions/.*/roll"
+    function: "position:admin"
+
+  - method: "POST"
+    pattern: "/api/state/positions/.*/rebuild"
+    function: "diagnostics:recalculate"

@@ -37,23 +37,68 @@ public class SolaceBackdatedTradeConsumer {
     }
     
     /**
-     * JMS Listener for backdated trades from Solace
+     * JMS Listener for backdated trades from Solace with partition awareness
      * This replaces the @KafkaListener when using Solace
      */
     @JmsListener(destination = "${app.solace.topics.backdated-trades:backdated-trades}", 
                  containerFactory = "jmsListenerContainerFactory",
                  subscription = "${app.solace.topics.backdated-trades:backdated-trades}")
     @Transactional
-    public void processBackdatedTrade(String tradeJson) {
+    public void processBackdatedTrade(jakarta.jms.Message message) {
         try {
+            if (!(message instanceof jakarta.jms.TextMessage)) {
+                log.warn("Received non-text message from Solace");
+                return;
+            }
+            
+            jakarta.jms.TextMessage textMessage = (jakarta.jms.TextMessage) message;
+            String tradeJson = textMessage.getText();
             TradeEvent backdatedTrade = objectMapper.readValue(tradeJson, TradeEvent.class);
-            log.info("Processing backdated trade from Solace in coldpath: tradeId={}, positionKey={}, effectiveDate={}", 
-                    backdatedTrade.getTradeId(), backdatedTrade.getPositionKey(), backdatedTrade.getEffectiveDate());
+            
+            // Extract partition information from JMS properties
+            String partitionKey = textMessage.getStringProperty("JMSXGroupID");
+            if (partitionKey == null) {
+                partitionKey = textMessage.getStringProperty("Solace_Partition_Key");
+            }
+            if (partitionKey == null) {
+                partitionKey = textMessage.getStringProperty("messageKey");
+            }
+            
+            Integer partitionId = null;
+            try {
+                String partitionIdStr = textMessage.getStringProperty("Solace_Partition_ID");
+                if (partitionIdStr != null) {
+                    partitionId = Integer.parseInt(partitionIdStr);
+                }
+            } catch (Exception e) {
+                // Partition ID not available
+            }
+            
+            // Extract user context
+            String userId = null;
+            try {
+                userId = textMessage.getStringProperty("user-id");
+            } catch (jakarta.jms.JMSException e) {
+                log.debug("No user-id property in JMS message");
+            }
+            
+            if (userId != null) {
+                log.info("Processing backdated trade from Solace in coldpath: tradeId={}, positionKey={}, effectiveDate={}, userId={}, partitionKey={}, partitionId={}", 
+                        backdatedTrade.getTradeId(), backdatedTrade.getPositionKey(), 
+                        backdatedTrade.getEffectiveDate(), userId, partitionKey, partitionId);
+            } else {
+                log.info("Processing backdated trade from Solace in coldpath: tradeId={}, positionKey={}, effectiveDate={}, partitionKey={}, partitionId={} (no user context)", 
+                        backdatedTrade.getTradeId(), backdatedTrade.getPositionKey(), 
+                        backdatedTrade.getEffectiveDate(), partitionKey, partitionId);
+            }
+            
+            // Track partition metrics if needed
+            // metricsService.recordPartitionProcessing(partitionKey);
             
             coldpathRecalculationService.recalculatePosition(backdatedTrade);
             
         } catch (Exception e) {
-            log.error("Failed to process backdated trade from Solace: {}", tradeJson, e);
+            log.error("Failed to process backdated trade from Solace", e);
             throw new RuntimeException("Failed to process backdated trade from Solace", e);
         }
     }

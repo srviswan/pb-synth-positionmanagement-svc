@@ -76,6 +76,10 @@ public class SolaceMessageProducer implements MessageProducer {
                 if (key != null && !key.isEmpty()) {
                     textMessage.setStringProperty("messageKey", key);
                     textMessage.setStringProperty("JMSCorrelationID", key);
+                    // Set JMSXGroupID for partition key (ensures messages with same key go to same partition)
+                    textMessage.setStringProperty("JMSXGroupID", key);
+                    // Also set Solace-specific partition key property
+                    textMessage.setStringProperty("Solace_Partition_Key", key);
                 }
                 
                 // Add user context to message properties
@@ -133,6 +137,9 @@ public class SolaceMessageProducer implements MessageProducer {
                 if (key != null && !key.isEmpty()) {
                     textMessage.setStringProperty("messageKey", key);
                     textMessage.setStringProperty("JMSCorrelationID", key);
+                    // Set JMSXGroupID for partition key
+                    textMessage.setStringProperty("JMSXGroupID", key);
+                    textMessage.setStringProperty("Solace_Partition_Key", key);
                 }
                 
                 textMessage.setStringProperty("contentType", "application/json");

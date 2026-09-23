@@ -1,8 +1,8 @@
 package com.bank.esps.api.filter;
 
 import com.bank.esps.api.service.UserContextExtractor;
+import com.bank.esps.application.service.authorization.EntitlementConfigurationService;
 import com.bank.esps.domain.auth.AuthorizationService;
-import com.bank.esps.domain.auth.PositionFunction;
 import com.bank.esps.domain.auth.UserContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -16,9 +16,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * Authorization filter that checks user entitlements before processing requests
@@ -32,6 +29,7 @@ public class AuthorizationFilter extends OncePerRequestFilter {
     
     private final AuthorizationService authorizationService;
     private final UserContextExtractor userContextExtractor;
+    private final EntitlementConfigurationService entitlementConfigService;
     
     @Value("${app.authorization.enabled:true}")
     private boolean authorizationEnabled;
@@ -39,29 +37,12 @@ public class AuthorizationFilter extends OncePerRequestFilter {
     @Value("${app.authorization.allow-anonymous:false}")
     private boolean allowAnonymous;
     
-    // Map of URL patterns to required functions
-    private static final Map<Pattern, PositionFunction> URL_FUNCTION_MAP = new HashMap<>();
-    
-    static {
-        // Trade endpoints
-        URL_FUNCTION_MAP.put(Pattern.compile("/api/trades"), PositionFunction.TRADE_CREATE);
-        URL_FUNCTION_MAP.put(Pattern.compile("/api/trades/.*"), PositionFunction.TRADE_VIEW);
-        
-        // Position endpoints
-        URL_FUNCTION_MAP.put(Pattern.compile("GET /api/positions"), PositionFunction.POSITION_VIEW);
-        URL_FUNCTION_MAP.put(Pattern.compile("GET /api/positions/.*"), PositionFunction.POSITION_VIEW);
-        URL_FUNCTION_MAP.put(Pattern.compile("PUT /api/positions/.*"), PositionFunction.POSITION_UPDATE);
-        
-        // Diagnostics endpoints
-        URL_FUNCTION_MAP.put(Pattern.compile("/api/diagnostics"), PositionFunction.DIAGNOSTICS_VIEW);
-        URL_FUNCTION_MAP.put(Pattern.compile("/api/diagnostics/recalculate"), PositionFunction.DIAGNOSTICS_RECALCULATE);
-        URL_FUNCTION_MAP.put(Pattern.compile("/api/diagnostics/recalculate/async"), PositionFunction.DIAGNOSTICS_RECALCULATE);
-    }
-    
     public AuthorizationFilter(AuthorizationService authorizationService,
-                              UserContextExtractor userContextExtractor) {
+                              UserContextExtractor userContextExtractor,
+                              EntitlementConfigurationService entitlementConfigService) {
         this.authorizationService = authorizationService;
         this.userContextExtractor = userContextExtractor;
+        this.entitlementConfigService = entitlementConfigService;
     }
     
     @Override
@@ -98,8 +79,10 @@ public class AuthorizationFilter extends OncePerRequestFilter {
             }
         }
         
-        // Determine required function
-        PositionFunction requiredFunction = determineRequiredFunction(request);
+        // Determine required function from file-based configuration
+        String requiredFunction = entitlementConfigService.findRequiredFunction(
+            request.getMethod(), path
+        );
         
         if (requiredFunction == null) {
             // No specific function required, allow access
@@ -110,17 +93,17 @@ public class AuthorizationFilter extends OncePerRequestFilter {
         // Check entitlement
         boolean authorized = authorizationService.hasEntitlement(
             userContext.getUserId(),
-            requiredFunction.getFunctionName()
+            requiredFunction
         );
         
         if (!authorized) {
             log.warn("User {} denied access to {} (required function: {})", 
-                userContext.getUserId(), path, requiredFunction.getFunctionName());
+                userContext.getUserId(), path, requiredFunction);
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json");
             response.getWriter().write(String.format(
                 "{\"error\":\"Forbidden\",\"message\":\"User does not have permission: %s\"}",
-                requiredFunction.getFunctionName()
+                requiredFunction
             ));
             return;
         }
@@ -134,7 +117,7 @@ public class AuthorizationFilter extends OncePerRequestFilter {
         request.setAttribute("userContext", userContext);
         
         log.debug("User {} authorized for {} (function: {})", 
-            userContext.getUserId(), path, requiredFunction.getFunctionName());
+            userContext.getUserId(), path, requiredFunction);
         
         filterChain.doFilter(request, response);
     }
@@ -144,40 +127,5 @@ public class AuthorizationFilter extends OncePerRequestFilter {
                path.startsWith("/actuator") ||
                path.startsWith("/swagger") ||
                path.startsWith("/v3/api-docs");
-    }
-    
-    private PositionFunction determineRequiredFunction(HttpServletRequest request) {
-        String method = request.getMethod();
-        String path = request.getRequestURI();
-        String methodPath = method + " " + path;
-        
-        // Check method-specific patterns first
-        for (Map.Entry<Pattern, PositionFunction> entry : URL_FUNCTION_MAP.entrySet()) {
-            if (entry.getKey().matcher(methodPath).matches() || 
-                entry.getKey().matcher(path).matches()) {
-                return entry.getValue();
-            }
-        }
-        
-        // Default mappings based on path
-        if (path.startsWith("/api/trades")) {
-            if ("POST".equals(method)) {
-                return PositionFunction.TRADE_CREATE;
-            } else {
-                return PositionFunction.TRADE_VIEW;
-            }
-        } else if (path.startsWith("/api/positions")) {
-            if ("GET".equals(method)) {
-                return PositionFunction.POSITION_VIEW;
-            } else if ("PUT".equals(method) || "PATCH".equals(method)) {
-                return PositionFunction.POSITION_UPDATE;
-            }
-        } else if (path.startsWith("/api/diagnostics/recalculate")) {
-            return PositionFunction.DIAGNOSTICS_RECALCULATE;
-        } else if (path.startsWith("/api/diagnostics")) {
-            return PositionFunction.DIAGNOSTICS_VIEW;
-        }
-        
-        return null; // No specific function required
     }
 }

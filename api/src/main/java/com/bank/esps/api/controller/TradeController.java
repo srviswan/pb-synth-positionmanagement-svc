@@ -7,7 +7,6 @@ import com.bank.esps.application.service.PositionService;
 import com.bank.esps.application.service.TradeValidationService;
 import com.bank.esps.api.service.UserContextExtractor;
 import com.bank.esps.domain.auth.AuthorizationService;
-import com.bank.esps.domain.auth.PositionFunction;
 import com.bank.esps.domain.auth.UserContext;
 import com.bank.esps.domain.event.TradeEvent;
 import com.bank.esps.domain.model.PositionState;
@@ -62,8 +61,7 @@ public class TradeController {
             }
             
             // Check entitlement (also checked in filter, but double-check here for data access)
-            if (!authorizationService.hasEntitlement(userContext.getUserId(), 
-                    PositionFunction.TRADE_CREATE.getFunctionName())) {
+            if (!authorizationService.hasEntitlement(userContext.getUserId(), "trade:create")) {
                 log.warn("User {} denied access to create trade", userContext.getUserId());
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }

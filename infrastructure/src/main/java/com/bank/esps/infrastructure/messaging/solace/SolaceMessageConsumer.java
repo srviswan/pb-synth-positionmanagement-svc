@@ -1,6 +1,7 @@
 package com.bank.esps.infrastructure.messaging.solace;
 
 import com.bank.esps.domain.messaging.MessageConsumer;
+import com.bank.esps.domain.messaging.PartitionAwareMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +16,7 @@ import org.springframework.stereotype.Component;
 import jakarta.jms.JMSException;
 import jakarta.jms.Message;
 import jakarta.jms.TextMessage;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
@@ -30,7 +31,9 @@ public class SolaceMessageConsumer implements MessageConsumer {
     private static final Logger log = LoggerFactory.getLogger(SolaceMessageConsumer.class);
     
     private final Map<String, Consumer<String>> handlers = new ConcurrentHashMap<>();
+    private final Map<String, Consumer<PartitionAwareMessage>> partitionAwareHandlers = new ConcurrentHashMap<>();
     private final JmsListenerEndpointRegistry registry;
+    private final Map<String, Set<String>> partitionKeys = new ConcurrentHashMap<>(); // Track partition keys per topic
     
     @Value("${app.solace.default-destination-type:topic}")
     private String defaultDestinationType;
@@ -55,8 +58,16 @@ public class SolaceMessageConsumer implements MessageConsumer {
     }
     
     @Override
+    public void subscribePartitionAware(String topic, Consumer<PartitionAwareMessage> partitionAwareHandler) {
+        partitionAwareHandlers.put(topic, partitionAwareHandler);
+        log.info("Registered partition-aware handler for Solace topic/queue: {}", topic);
+    }
+    
+    @Override
     public void unsubscribe(String topic) {
         handlers.remove(topic);
+        partitionAwareHandlers.remove(topic);
+        partitionKeys.remove(topic);
         
         // Stop the listener container if it exists
         if (registry != null) {
@@ -71,10 +82,10 @@ public class SolaceMessageConsumer implements MessageConsumer {
     }
     
     /**
-     * Process a message received from Solace
-     * This method is called by @JmsListener annotated methods
+     * Process a message received from Solace with partition awareness
+     * This method extracts partition information from JMS properties
      */
-    public void processMessage(String topic, Message message) {
+    public void processMessageWithPartition(String topic, Message message) {
         try {
             if (!(message instanceof TextMessage)) {
                 log.warn("Received non-text message from topic: {}", topic);
@@ -84,15 +95,70 @@ public class SolaceMessageConsumer implements MessageConsumer {
             TextMessage textMessage = (TextMessage) message;
             String messageBody = textMessage.getText();
             
-            // Extract message key if available
+            // Extract message key
             String messageKey = textMessage.getStringProperty("messageKey");
             if (messageKey == null) {
                 messageKey = textMessage.getJMSCorrelationID();
             }
             
-            log.debug("Received message from Solace topic: {}, key: {}", topic, messageKey);
+            // Extract partition key (JMSXGroupID is standard for partition keys in JMS)
+            String partitionKey = textMessage.getStringProperty("JMSXGroupID");
+            if (partitionKey == null) {
+                // Fallback to Solace-specific partition key property
+                partitionKey = textMessage.getStringProperty("Solace_Partition_Key");
+            }
+            if (partitionKey == null) {
+                // Use message key as partition key if available
+                partitionKey = messageKey;
+            }
             
-            // Get handler for this topic
+            // Extract partition ID if available (Solace partition-aware queues)
+            Integer partitionId = null;
+            try {
+                String partitionIdStr = textMessage.getStringProperty("Solace_Partition_ID");
+                if (partitionIdStr != null) {
+                    partitionId = Integer.parseInt(partitionIdStr);
+                }
+            } catch (Exception e) {
+                // Partition ID not available or not a number
+            }
+            
+            // Extract timestamp
+            Long timestamp = null;
+            try {
+                timestamp = textMessage.getJMSTimestamp();
+            } catch (Exception e) {
+                timestamp = System.currentTimeMillis();
+            }
+            
+            // Track partition keys for this topic
+            if (partitionKey != null) {
+                partitionKeys.computeIfAbsent(topic, k -> ConcurrentHashMap.newKeySet())
+                    .add(partitionKey);
+            }
+            
+            // Create partition-aware message
+            PartitionAwareMessage partitionAwareMessage = new PartitionAwareMessage(
+                messageBody,
+                messageKey,
+                partitionId,
+                partitionKey,
+                topic,
+                null, // Offset not applicable for Solace
+                timestamp
+            );
+            
+            log.debug("Received message from Solace topic: {}, key: {}, partitionKey: {}, partitionId: {}", 
+                topic, messageKey, partitionKey, partitionId);
+            
+            // Try partition-aware handler first
+            Consumer<PartitionAwareMessage> partitionAwareHandler = partitionAwareHandlers.get(topic);
+            if (partitionAwareHandler != null) {
+                partitionAwareHandler.accept(partitionAwareMessage);
+                return;
+            }
+            
+            // Fallback to simple handler
             Consumer<String> handler = handlers.get(topic);
             if (handler != null) {
                 handler.accept(messageBody);
@@ -107,9 +173,33 @@ public class SolaceMessageConsumer implements MessageConsumer {
     }
     
     /**
+     * Process a message received from Solace (simple, backward compatible)
+     * This method is called by @JmsListener annotated methods
+     */
+    public void processMessage(String topic, Message message) {
+        // Delegate to partition-aware method
+        processMessageWithPartition(topic, message);
+    }
+    
+    /**
      * Get handler for a topic
      */
     public Consumer<String> getHandler(String topic) {
         return handlers.get(topic);
+    }
+    
+    @Override
+    public List<Integer> getAssignedPartitions(String topic) {
+        // For Solace, partition information is not directly available via JMS
+        // Would need to query Solace admin API or use partition-aware queue configuration
+        // For now, return null to indicate partition info not available
+        return null;
+    }
+    
+    /**
+     * Get partition keys seen for a topic
+     */
+    public Set<String> getPartitionKeys(String topic) {
+        return partitionKeys.getOrDefault(topic, Collections.emptySet());
     }
 }
